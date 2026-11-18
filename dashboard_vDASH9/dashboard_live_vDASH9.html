@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>BOT CONTROL ROOM</title>
+<style>
+  :root{
+    --void:#05070A; --panel:#0E1319; --line:#212A34;
+    --amber:#FFB000; --amber-dim:#8A6100; --cyan:#4FC3F7;
+    --green:#00E5A0; --red:#FF4757;
+    --text:#E8EAED; --text-dim:#6B7684;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--void); color:var(--text);
+    font-family:'IBM Plex Mono','Roboto Mono',monospace; min-height:100vh;}
+  .ui{font-family:'Inter',-apple-system,sans-serif;}
+
+  header{display:flex; align-items:center; justify-content:space-between;
+    padding:18px 26px; border-bottom:1px solid var(--line); flex-wrap:wrap; gap:14px;}
+  .brand h1{font-family:'Inter',sans-serif; font-size:20px; letter-spacing:2px;
+    margin:0; font-weight:700; color:var(--amber);}
+  .brand span{font-size:14px; color:var(--text-dim); font-family:'Inter',sans-serif;}
+  .pnl-combined{text-align:right;}
+  .pnl-combined .label{font-size:13px; letter-spacing:1.5px; color:var(--text-dim); font-family:'Inter',sans-serif;}
+  .pnl-combined .value{font-size:38px; font-weight:600;}
+  .kill-all{background:transparent; color:var(--red); border:1px solid var(--red);
+    padding:12px 22px; font-family:'Inter',sans-serif; font-weight:600; font-size:15px;
+    letter-spacing:1px; cursor:pointer; border-radius:2px;}
+  .kill-all:hover{background:var(--red); color:#000;}
+
+  .cfgbar{display:flex; align-items:center; gap:10px; padding:12px 26px;
+    background:var(--panel); border-bottom:1px solid var(--line);
+    font-family:'Inter',sans-serif; font-size:14px; color:var(--text-dim);}
+  .cfgbar input{background:#000; border:1px solid var(--line); color:var(--text);
+    font-family:'IBM Plex Mono',monospace; font-size:14px; padding:7px 10px; border-radius:2px; width:260px;}
+  .dot{width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:6px;}
+  .dot.ok{background:var(--green); box-shadow:0 0 6px var(--green);}
+  .dot.bad{background:var(--red);}
+
+  main{padding:20px 26px 40px;}
+  table{width:100%; border-collapse:collapse; font-size:16px; background:var(--panel);
+    border:1px solid var(--line); border-radius:3px; overflow:hidden;}
+  th{text-align:left; font-family:'Inter',sans-serif; font-size:13px; letter-spacing:1px;
+    color:var(--text-dim); font-weight:500; padding:13px 18px; border-bottom:1px solid var(--line);}
+  td{padding:14px 18px; border-bottom:1px solid #171D25;}
+  tr:last-child td{border-bottom:none;}
+  .bot-id{color:var(--text); font-weight:600;}
+  .status{display:flex; align-items:center; gap:7px; font-family:'Inter',sans-serif; font-size:14px;}
+  .status .d{width:7px; height:7px; border-radius:50%;}
+  .st-run{color:var(--green);} .st-run .d{background:var(--green); box-shadow:0 0 6px var(--green);}
+  .st-halt{color:var(--red);} .st-halt .d{background:var(--red);}
+  .st-stale{color:var(--text-dim);} .st-stale .d{background:var(--text-dim);}
+  .pnl{font-weight:600;}
+  .up{color:var(--green);} .down{color:var(--red);}
+  .kill-one{font-family:'Inter',sans-serif; font-size:13px; font-weight:600; letter-spacing:.5px;
+    border:1px solid var(--line); background:transparent; color:var(--text-dim);
+    padding:8px 14px; border-radius:2px; cursor:pointer;}
+  .kill-one:hover{border-color:var(--red); color:var(--red);}
+  .empty{padding:40px; text-align:center; color:var(--text-dim); font-family:'Inter',sans-serif; font-size:16px;}
+  footer{padding:14px 26px; border-top:1px solid var(--line);
+    font-family:'Inter',sans-serif; font-size:13px; color:var(--text-dim);}
+
+  .sectionlabel{font-family:'Inter',sans-serif; font-size:12px; letter-spacing:1.5px;
+    color:var(--text-dim); font-weight:600; margin:0 0 8px;}
+  .broker-table td{border-left:1px solid #171D25;}
+  .broker-table td:first-child{border-left:none;}
+  .broker-cell{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+  .broker-cell .pnl-wrap{display:flex; align-items:center; gap:7px; font-size:15px;}
+  .broker-cell .d{width:7px; height:7px; border-radius:50%; flex-shrink:0;}
+  .kill-cell{font-size:12px; font-family:'Inter',sans-serif; color:var(--text-dim);
+    background:transparent; border:1px solid var(--line); border-radius:3px;
+    padding:4px 8px; cursor:pointer; line-height:1;}
+  .kill-cell:hover{border-color:var(--red); color:var(--red);}
+  .instrument-cell{font-weight:600; font-family:'Inter',sans-serif; font-size:14px; letter-spacing:.5px;}
+  .otherwrap{margin-top:16px;}
+
+  /* v-DASH7: Nifty and Sensex panels now get EQUAL width (was 2fr 1fr 1fr,
+     which squeezed Sensex: its DPCR readout wrapped onto two lines and its
+     chart text shrank). BankNifty panel is hidden until a BankNifty bot
+     reports; if it ever does, the row switches to three equal columns. */
+  .bottomrow{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; margin-top:22px;}
+  .bottomrow.three{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);}
+  .readout .value.dual{white-space:nowrap;}
+  /* v-DASH7: per-broker DPCR feed age under each chart panel */
+  .feedline{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-dim); margin:-6px 0 8px;}
+  .feedline .late{color:var(--red); font-weight:600;}
+  /* v-DASH7: a bot that stopped reporting / was halted is shown plainly */
+  .cell-alert{font-weight:600; letter-spacing:.3px;}
+
+  /* v-DASH8: tabs + P/L curves page */
+  .tabbar{display:flex; gap:8px; padding:12px 26px 0;}
+  .tab{font-family:'Inter',sans-serif; font-size:13px; font-weight:600; letter-spacing:1px;
+    background:transparent; color:var(--text-dim); border:1px solid var(--line);
+    padding:8px 16px; border-radius:2px; cursor:pointer;}
+  .tab.active{color:var(--amber); border-color:var(--amber);}
+  .pnlstats{display:flex; flex-wrap:wrap; gap:22px; align-items:baseline; font-size:15px; margin-bottom:6px;}
+  .pnlstats .lab{font-family:'Inter',sans-serif; font-size:12px; letter-spacing:1.5px; color:var(--text-dim); font-weight:600; margin-right:6px;}
+  .pnlstats .tm{color:var(--text-dim); font-size:12px; margin-left:4px;}
+  svg.pnlbig{width:100%; height:280px; display:block;}
+  svg.pnlsmall{width:100%; height:150px; display:block;}
+  .pnlgrid{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; margin-top:16px;}
+  .pnlcard-foot{font-family:'IBM Plex Mono',monospace; font-size:13px; color:var(--text-dim); margin-top:4px;}
+  .slotline{stroke:#2A3542; stroke-width:1; stroke-dasharray:2,4;}
+  .slottext{font-family:'Inter',sans-serif; font-size:12px; fill:var(--text-dim);}
+  .chartblock{background:var(--panel); border:1px solid var(--line); border-radius:3px; padding:14px 16px;}
+  .chartblock h2{font-family:'Inter',sans-serif; font-size:13px; letter-spacing:1.5px; color:var(--text-dim);
+    font-weight:600; margin:0 0 10px;}
+  .futureblock{background:var(--panel); border:1px dashed var(--line); border-radius:3px;
+    display:flex; align-items:center; justify-content:center; min-height:100%;}
+  .futureblock span{font-family:'Inter',sans-serif; font-size:13px; color:var(--text-dim);}
+  .chartrow{display:flex; flex-direction:column; gap:2px;}
+  .chartlabel{font-family:'Inter',sans-serif; font-size:12px; color:var(--text-dim); margin-bottom:2px;}
+  svg.linechart{width:100%; height:90px; display:block;}
+  .gridline{stroke:#1B2430; stroke-width:1;}
+  .axisline{stroke:#3E4B5B; stroke-width:1.5;}
+  .refline{stroke:var(--amber-dim); stroke-width:1; stroke-dasharray:3,3;}
+  .datapath{fill:none; stroke-width:1.6;}
+  .axistext{font-family:'IBM Plex Mono',monospace; font-size:12.5px; font-weight:700; fill:#B7C1CC;}
+  .chart-empty{font-family:'Inter',sans-serif; font-size:13px; color:var(--text-dim); padding:20px 0; text-align:center;}
+
+  /* v-DASH4: prominent current-value readout for DPCR/Nifty -- explicit
+     instruction for bigger font/display, since the small chart y-axis
+     labels are hard to read at a glance. Same visual language as the
+     header's COMBINED P/L number, sized down slightly to fit two side
+     by side. */
+  .readoutrow{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:14px;}
+  .readout{background:#0A0E13; border:1px solid var(--line); border-radius:3px; padding:12px 16px;}
+  .readout .label{font-family:'Inter',sans-serif; font-size:12px; letter-spacing:1.5px;
+    color:var(--text-dim); font-weight:600; margin-bottom:4px;}
+  .readout .value{font-size:32px; font-weight:600; font-variant-numeric:tabular-nums;}
+  /* v-DASH5: per-broker DPCR readout + legend */
+  .readout .value.dual{font-size:22px; line-height:1.25;}
+  .readout .sub{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-dim); margin-top:3px;}
+  .legend{font-family:'Inter',sans-serif; font-size:12px; color:var(--text-dim); margin-left:8px;}
+  .legend b{font-weight:600;}
+  .zoneband{fill:#FFB000; opacity:.07;}
+  /* v-DASH9: hover crosshair + value box */
+  #hvTip{position:fixed; display:none; pointer-events:none; z-index:50; background:#0A0E13;
+    border:1px solid #3E4B5B; border-radius:3px; padding:7px 10px; font-family:'IBM Plex Mono',monospace;
+    font-size:13px; line-height:1.6; color:var(--text); white-space:nowrap;}
+  #hvTip .hvt{color:var(--text-dim); font-size:12px;}
+  .hvline{stroke:#B7C1CC; stroke-width:1; stroke-dasharray:2,3;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>BOT CONTROL ROOM</h1>
+    <span>live view · kill switches only · restart = go run it in IntelliJ</span>
+  </div>
+  <div class="pnl-combined">
+    <div class="label">COMBINED P/L</div>
+    <div class="value" id="combinedPnl">₹ 0</div>
+  </div>
+  <button class="kill-all" onclick="killAll()">⏻ KILL ALL BOTS</button>
+</header>
+
+<div class="cfgbar">
+  <span id="connDot"><span class="dot bad"></span>backend not reachable yet</span>
+  <span style="margin-left:auto">backend URL:</span>
+  <input id="backendUrl" value="http://localhost:8000" onchange="saveUrl()">
+</div>
+
+<!-- v-DASH8: two tabs. Kill buttons stay in the header on both tabs. -->
+<div class="tabbar">
+  <button class="tab active" id="tabBtnLive" onclick="showTab('live')">LIVE CONTROL</button>
+  <button class="tab" id="tabBtnPnl" onclick="showTab('pnl')">P/L CURVES</button>
+</div>
+
+<div id="hvTip"></div>
+
+<main id="tabPnl" style="display:none">
+  <div class="chartblock">
+    <h2>COMBINED P/L &nbsp;·&nbsp; ALL BOTS &nbsp;·&nbsp; INCLUDES OPEN-TRADE P/L</h2>
+    <div class="pnlstats" id="pnlStats"></div>
+    <svg class="pnlbig" id="pnlCombined" viewBox="0 0 1200 280"></svg>
+    <div class="chart-empty" id="pnlEmptyMsg" style="display:none"></div>
+  </div>
+  <div class="pnlgrid" id="pnlGrid"></div>
+  <div class="chartlabel" style="margin-top:10px">
+    <span class="legend" style="margin-left:0"><b style="color:var(--amber)">━ FYERS</b> &nbsp;<b style="color:var(--cyan)">━ RMONEY</b></span>
+    &nbsp; one point per 30 s · lines go flat when no trade is open · refresh 30 s
+  </div>
+</main>
+
+<main id="tabLive">
+  <div class="sectionlabel">BOT_G</div>
+  <table class="broker-table">
+    <tr><th>INSTRUMENT</th><th>FYERS</th><th>RMONEY</th></tr>
+    <tbody id="ggRows"></tbody>
+  </table>
+  <div class="empty" id="emptyMsg" style="display:none">
+    No bots reporting yet. Add the heartbeat snippet to a bot file and start it in IntelliJ - it'll appear here within a couple seconds.
+  </div>
+
+  <div class="otherwrap" id="otherWrap" style="display:none">
+    <div class="sectionlabel">OTHER</div>
+    <table>
+      <tbody id="otherRows"></tbody>
+    </table>
+  </div>
+
+  <div class="bottomrow" id="bottomRow">
+    <div class="chartblock">
+      <h2>BOT_G &nbsp;·&nbsp; DPCR / NIFTY &nbsp;·&nbsp; 3-MIN</h2>
+      <div class="readoutrow">
+        <div class="readout">
+          <div class="label">DPCR</div>
+          <div class="value" id="dpcrReadout" style="color:var(--amber)">--</div>
+        </div>
+        <div class="readout">
+          <div class="label">NIFTY SPOT</div>
+          <div class="value" id="niftyReadout" style="color:var(--green)">--</div>
+        </div>
+      </div>
+      <div class="feedline" id="feedNifty"></div>
+      <div class="chartrow">
+        <div class="chartlabel">DPCR signed −1…+1 &nbsp;(dashed = 0, shaded = no-trade zone)<span class="legend"><b style="color:var(--amber)">━ FYERS</b> &nbsp;<b style="color:var(--cyan)">━ RMONEY</b></span></div>
+        <svg class="linechart" id="chartDpcr" viewBox="0 0 600 90"></svg>
+        <div class="chartlabel" style="margin-top:6px">NIFTY SPOT</div>
+        <svg class="linechart" id="chartNifty" viewBox="0 0 600 90"></svg>
+      </div>
+      <div class="chart-empty" id="chartEmptyMsg" style="display:none">
+        No BOT_G readings yet. Once BOT_G is wired to POST /botg_reading, this fills in automatically.
+      </div>
+    </div>
+    <div class="chartblock">
+      <h2>BOT_G &nbsp;·&nbsp; DPCR / SENSEX &nbsp;·&nbsp; 3-MIN</h2>
+      <div class="readoutrow">
+        <div class="readout">
+          <div class="label">DPCR</div>
+          <div class="value" id="dpcrSensexReadout" style="color:var(--amber)">--</div>
+        </div>
+        <div class="readout">
+          <div class="label">SENSEX SPOT</div>
+          <div class="value" id="sensexReadout" style="color:var(--green)">--</div>
+        </div>
+      </div>
+      <div class="feedline" id="feedSensex"></div>
+      <div class="chartrow">
+        <div class="chartlabel">DPCR signed −1…+1 &nbsp;(dashed = 0, shaded = no-trade zone)<span class="legend"><b style="color:var(--amber)">━ FYERS</b> &nbsp;<b style="color:var(--cyan)">━ RMONEY</b></span></div>
+        <svg class="linechart" id="chartDpcrSensex" viewBox="0 0 600 90"></svg>
+        <div class="chartlabel" style="margin-top:6px">SENSEX SPOT</div>
+        <svg class="linechart" id="chartSensexSpot" viewBox="0 0 600 90"></svg>
+      </div>
+      <div class="chart-empty" id="chartEmptyMsgSensex" style="display:none">
+        No Sensex BOT_G DPCR readings yet. Sensex spot will continue updating independently; DPCR appears when the option-chain snapshot is valid.
+      </div>
+    </div>
+    <!-- v-DASH7: hidden until a BankNifty bot reports (status or DPCR reading) -->
+    <div class="chartblock" id="bnPanel" style="display:none">
+      <h2>BOT_G &nbsp;·&nbsp; DPCR / BANKNIFTY &nbsp;·&nbsp; 10-MIN</h2>
+      <div class="chartrow">
+        <div class="chartlabel">DPCR signed −1…+1 &nbsp;(dashed = 0, shaded = no-trade zone)<span class="legend"><b style="color:var(--amber)">━ FYERS</b> &nbsp;<b style="color:var(--cyan)">━ RMONEY</b></span></div>
+        <svg class="linechart" id="chartDpcrBankNifty" viewBox="0 0 600 90"></svg>
+        <div class="chartlabel" style="margin-top:6px">BANKNIFTY SPOT</div>
+        <svg class="linechart" id="chartBankNiftySpot" viewBox="0 0 600 90"></svg>
+      </div>
+      <div class="chart-empty" id="chartEmptyMsgBankNifty" style="display:none">
+        No BankNifty BOT_G readings yet. Once the BankNifty process is wired to POST /banknifty_reading, this fills in automatically.
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>v-DASH9 (03-Nov-2026): hover values on DPCR, spot and P/L charts · v-DASH8 P/L curves (needs backend v-DASH8) &nbsp;|&nbsp; refresh: P/L 2s, charts 20s, curves 30s &nbsp;|&nbsp; this page only reads status - it never launches or edits your bots</footer>
+
+<script>
+let backendUrl = "http://localhost:8000";
+function saveUrl(){ backendUrl = document.getElementById("backendUrl").value.replace(/\/$/,""); poll(); }
+
+function fmt(n){
+  const sign = n>=0 ? "+" : "−";
+  return sign + "₹" + Math.abs(Math.round(n)).toLocaleString("en-IN");
+}
+function timeAgo(ts){
+  const s = Math.round(Date.now()/1000 - ts);
+  return s < 60 ? s+"s ago" : Math.round(s/60)+"m ago";
+}
+
+// v-DASH7: confirm before a single kill too. The main (G) and early (GE)
+// cells of one instrument+broker belong to the SAME bot process, so a kill
+// from either cell stops both slots -- the prompt says so.
+async function killOne(botId){
+  const procNote = /_(G|GE)$/.test(botId)
+    ? "\n\nThis stops the whole bot process for this instrument and broker (main AND early slot)."
+    : "";
+  if(!confirm(`Send halt command to ${botId}?${procNote}`)) return;
+  await fetch(`${backendUrl}/kill/${encodeURIComponent(botId)}`, {method:"POST"});
+  pollStatus();
+}
+async function killAll(){
+  if(!confirm("Send halt command to every reporting bot?")) return;
+  await fetch(`${backendUrl}/kill_all`, {method:"POST"});
+  pollStatus();
+}
+
+// Hand-rolled SVG line chart -- no charting library, matches this
+// dashboard's existing zero-dependency style. viewBox is 600x90; left
+// margin reserved for a couple of y-axis labels.
+// v-DASH3: H was hardcoded to 130 here but the actual <svg> elements were
+// resized to viewBox="0 0 600 90" in an earlier session (shrinking the
+// charts to fit the smaller bottom-left panel) -- this function was never
+// updated to match. Everything below y=90 rendered OUTSIDE the visible
+// viewBox: the x-axis time labels (drawn at the old H-2=128) were
+// entirely off-screen, and values near the padded top/bottom edge were
+// getting visually clipped for the same reason. Fixed by matching H to
+// the real viewBox and rebalancing padT/padB for the smaller canvas.
+function drawLineChart(svgId, points, opts){
+  const svg = document.getElementById(svgId);
+  const W=600, H=90, padL=46, padR=8, padT=8, padB=18;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+
+  if(!points.length){ svg.innerHTML=""; hvUnregister(svgId); return; }
+
+  let vals = points.map(p=>p.v);
+  let vmin = Math.min(...vals), vmax = Math.max(...vals);
+  if(opts.includeRef !== undefined){
+    vmin = Math.min(vmin, opts.includeRef);
+    vmax = Math.max(vmax, opts.includeRef);
+  }
+  if(vmax===vmin){ vmax+=1; vmin-=1; }
+  const pad = (vmax-vmin)*0.12;
+  vmin -= pad; vmax += pad;
+
+  // v-DASH7: if points carry a timestamp (ts), space them by TIME, the same
+  // way the DPCR chart above does -- before, spot points were spaced evenly
+  // by count, so after a gap (e.g. a restart) the spot and DPCR charts
+  // drifted apart horizontally.
+  const useTs = points.every(p => p.ts != null) && points.length > 1;
+  const t0 = useTs ? points[0].ts : 0, t1 = useTs ? points[points.length-1].ts : 1;
+  const x = i => padL + (points.length===1 ? plotW/2
+        : useTs ? ((points[i].ts - t0)/((t1 - t0) || 1))*plotW
+        : (i/(points.length-1))*plotW);
+  const y = v => padT + plotH - ((v-vmin)/(vmax-vmin))*plotH;
+
+  let svgContent = "";
+  // horizontal gridlines (3)
+  for(let g=0; g<=2; g++){
+    const gy = padT + (plotH/2)*g;
+    svgContent += `<line class="gridline" x1="${padL}" y1="${gy}" x2="${W-padR}" y2="${gy}"/>`;
+  }
+  // reference line (DPCR chart's 1.0 line)
+  if(opts.includeRef !== undefined){
+    const ry = y(opts.includeRef);
+    svgContent += `<line class="refline" x1="${padL}" y1="${ry}" x2="${W-padR}" y2="${ry}"/>`;
+    svgContent += `<text class="axistext" x="${padL-6}" y="${ry+3}" text-anchor="end">${opts.includeRef.toFixed(1)}</text>`;
+  }
+  // y-axis min/max labels
+  svgContent += `<text class="axistext" x="${padL-6}" y="${padT+4}" text-anchor="end">${vmax.toFixed(opts.decimals)}</text>`;
+  svgContent += `<text class="axistext" x="${padL-6}" y="${padT+plotH}" text-anchor="end">${vmin.toFixed(opts.decimals)}</text>`;
+  // x-axis baseline: a distinct, brighter/thicker line so the axis itself
+  // is actually visible, not just implied by the (very faint) gridlines.
+  svgContent += `<line class="axisline" x1="${padL}" y1="${padT+plotH}" x2="${W-padR}" y2="${padT+plotH}"/>`;
+  // x-axis: first/last timestamps only, keeps it uncluttered
+  svgContent += `<text class="axistext" x="${padL}" y="${H-3}" text-anchor="start">${points[0].t}</text>`;
+  svgContent += `<text class="axistext" x="${W-padR}" y="${H-3}" text-anchor="end">${points[points.length-1].t}</text>`;
+
+  // data line
+  const path = points.map((p,i)=> (i===0?"M":"L") + x(i).toFixed(1) + "," + y(p.v).toFixed(1)).join(" ");
+  svgContent += `<path class="datapath" d="${path}" stroke="${opts.color}"/>`;
+  // data points
+  points.forEach((p,i)=>{
+    svgContent += `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="1.8" fill="${opts.color}"/>`;
+  });
+
+  svg.innerHTML = svgContent;
+  // v-DASH9: hover registration (time-based charts only)
+  if(useTs) hvRegister(svgId, {kind:"spot", order:2, padL, plotW, tmin:t0, tmax:t1,
+      x: t => padL + ((t - t0)/((t1 - t0) || 1))*plotW, y, pts: points});
+  else hvUnregister(svgId);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// v-DASH5 (09-Oct-2026): per-broker SIGNED DPCR charts. Reads the new
+// /*_series_v2 endpoints ({broker: [{time,dpcr,raw,spot,zone}]}). Fixed
+// -1..+1 scale, dashed zero line, shaded no-trade zone, one line per
+// broker on a shared TIME axis (the two brokers post at slightly
+// different moments). If the backend is still the old one (no _v2
+// endpoint), the legacy single-series functions below are used instead.
+const BROKER_COLORS = {FYERS:"var(--amber)", RMONEY:"var(--cyan)"};
+const toHHMM = ts => new Date(ts*1000).toTimeString().slice(0,5);
+
+function drawDpcrChart(svgId, byBroker){
+  const svg = document.getElementById(svgId);
+  const W=600, H=90, padL=46, padR=8, padT=8, padB=18;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+  const brokers = Object.keys(byBroker).filter(b => byBroker[b].some(p => p.dpcr != null));
+  if(!brokers.length){ svg.innerHTML=""; hvUnregister(svgId); return; }
+  let tmin=Infinity, tmax=-Infinity, zone=null, zoneT=-1;
+  brokers.forEach(b => byBroker[b].forEach(p => {
+    if(p.dpcr == null) return;
+    tmin=Math.min(tmin,p.time); tmax=Math.max(tmax,p.time);
+    if(p.zone != null && p.time > zoneT){ zone=Math.abs(p.zone); zoneT=p.time; }
+  }));
+  if(tmax===tmin){ tmax=tmin+1; }
+  const vmin=-1.1, vmax=1.1;
+  const x = t => padL + ((t-tmin)/(tmax-tmin))*plotW;
+  const y = v => padT + plotH - ((v-vmin)/(vmax-vmin))*plotH;
+  let s = "";
+  if(zone != null){
+    s += `<rect class="zoneband" x="${padL}" y="${y(zone)}" width="${plotW}" height="${y(-zone)-y(zone)}"/>`;
+  }
+  [1,-1].forEach(v => s += `<line class="gridline" x1="${padL}" y1="${y(v)}" x2="${W-padR}" y2="${y(v)}"/>`);
+  s += `<line class="refline" x1="${padL}" y1="${y(0)}" x2="${W-padR}" y2="${y(0)}"/>`;
+  s += `<text class="axistext" x="${padL-6}" y="${y(1)+4}" text-anchor="end">+1</text>`;
+  s += `<text class="axistext" x="${padL-6}" y="${y(0)+4}" text-anchor="end">0</text>`;
+  s += `<text class="axistext" x="${padL-6}" y="${y(-1)+4}" text-anchor="end">−1</text>`;
+  s += `<line class="axisline" x1="${padL}" y1="${padT+plotH}" x2="${W-padR}" y2="${padT+plotH}"/>`;
+  s += `<text class="axistext" x="${padL}" y="${H-3}" text-anchor="start">${toHHMM(tmin)}</text>`;
+  s += `<text class="axistext" x="${W-padR}" y="${H-3}" text-anchor="end">${toHHMM(tmax)}</text>`;
+  brokers.forEach(b => {
+    const pts = byBroker[b].filter(p => p.dpcr != null);
+    const col = BROKER_COLORS[b] || "var(--text)";
+    const clamp = v => Math.max(vmin, Math.min(vmax, v));
+    const path = pts.map((p,i)=> (i===0?"M":"L") + x(p.time).toFixed(1) + "," + y(clamp(p.dpcr)).toFixed(1)).join(" ");
+    s += `<path class="datapath" d="${path}" stroke="${col}"/>`;
+    pts.forEach(p => s += `<circle cx="${x(p.time).toFixed(1)}" cy="${y(clamp(p.dpcr)).toFixed(1)}" r="1.6" fill="${col}"/>`);
+  });
+  svg.innerHTML = s;
+  // v-DASH9: hover registration
+  const byB = {}; brokers.forEach(b => byB[b] = byBroker[b].filter(p => p.dpcr != null));
+  hvRegister(svgId, {kind:"dpcr", order:1, padL, plotW, tmin, tmax, x,
+      y: v => y(Math.max(vmin, Math.min(vmax, v))), by: byB});
+}
+
+function spotPoints(byBroker){
+  const pick = byBroker.FYERS && byBroker.FYERS.length ? "FYERS"
+             : byBroker.RMONEY && byBroker.RMONEY.length ? "RMONEY"
+             : Object.keys(byBroker)[0];
+  if(!pick) return [];
+  return byBroker[pick].filter(p => p.spot != null).map(p => ({t: toHHMM(p.time), v: Number(p.spot), ts: p.time}));
+}
+
+// v-DASH7: how old is each broker's latest DPCR reading? Bots post one per
+// 3-min candle, so anything older than FEED_LATE_SEC (7 min = 2 missed
+// candles) is flagged red -- e.g. the 16-Oct Fyers quota stop would have
+// shown up here immediately.
+const FEED_LATE_SEC = 420;
+function ageText(sec){
+  sec = Math.max(0, Math.round(sec));
+  return sec < 60 ? sec + "s ago" : sec < 3600 ? Math.round(sec/60) + "m ago" : Math.floor(sec/3600) + "h " + Math.round((sec%3600)/60) + "m ago";
+}
+function setFeedLine(elId, byBroker){
+  const el = document.getElementById(elId);
+  if(!el) return;
+  const now = Date.now()/1000, parts = [];
+  ["FYERS","RMONEY"].forEach(b => {
+    const pts = (byBroker[b] || []).filter(p => p.dpcr != null);
+    if(!pts.length) return;
+    const age = now - pts[pts.length-1].time;
+    const txt = `${b[0]} ${ageText(age)}`;
+    parts.push(age > FEED_LATE_SEC ? `<span class="late">${txt}</span>` : txt);
+  });
+  el.innerHTML = parts.length ? "DPCR feed: " + parts.join(" · ") : "";
+}
+
+function dpcrReadoutHtml(byBroker){
+  const parts = [], raws = [];
+  ["FYERS","RMONEY","UNKNOWN"].forEach(b => {
+    const pts = (byBroker[b] || []).filter(p => p.dpcr != null);
+    if(!pts.length) return;
+    const p = pts[pts.length-1];
+    const col = p.dpcr > 0 ? "var(--green)" : p.dpcr < 0 ? "var(--red)" : "var(--text)";
+    const tag = b === "UNKNOWN" ? "?" : b[0];
+    parts.push(`<span style="color:var(--text-dim);font-size:14px">${tag}</span> <span style="color:${col}">${p.dpcr>=0?"+":""}${Number(p.dpcr).toFixed(2)}</span>`);
+    if(p.raw != null) raws.push(`${tag} raw ${Number(p.raw).toFixed(2)}`);
+  });
+  if(!parts.length) return null;
+  return {main: parts.join(" &nbsp; "), sub: raws.join(" · ")};
+}
+
+function setReadout(elId, byBroker){
+  const el = document.getElementById(elId);
+  const r = dpcrReadoutHtml(byBroker);
+  el.classList.add("dual");
+  el.style.color = "var(--text)";
+  el.innerHTML = r ? `${r.main}${r.sub ? `<div class="sub">${r.sub}</div>` : ""}` : "--";
+}
+
+async function fetchV2(path){
+  const r = await fetch(`${backendUrl}${path}`, {cache:"no-store"});
+  if(!r.ok) throw new Error("no v2");
+  const by = await r.json();
+  // Readings without a broker tag come from pre-vE5 bots and carry the RAW
+  // ratio, not the signed DPCR -- hide them once any tagged broker reports.
+  if(Object.keys(by).some(b => b !== "UNKNOWN" && by[b].length)) delete by.UNKNOWN;
+  return by;
+}
+
+async function pollBotG(){
+  let by;
+  try{ by = await fetchV2("/botg_series_v2"); }catch(e){ return pollBotGLegacy(); }
+  const has = Object.values(by).some(l => l.length);
+  document.getElementById("chartEmptyMsg").style.display = has ? "none" : "block";
+  if(!has) return;
+  setFeedLine("feedNifty", by);   // v-DASH7
+  setReadout("dpcrReadout", by);
+  const sp = spotPoints(by);
+  if(sp.length) document.getElementById("niftyReadout").textContent = Math.round(sp[sp.length-1].v).toLocaleString("en-IN");
+  drawDpcrChart("chartDpcr", by);
+  drawLineChart("chartNifty", sp, {color:"var(--green)", decimals:0});
+}
+
+async function pollBotGSensex(){
+  let by;
+  try{ by = await fetchV2("/sensex_series_v2"); }catch(e){ return pollBotGSensexLegacy(); }
+  try{
+    const spotState = await (await fetch(`${backendUrl}/sensex_spot`, {cache:"no-store"})).json();
+    if(spotState && spotState.sensex_spot != null)
+      document.getElementById("sensexReadout").textContent = Number(spotState.sensex_spot).toLocaleString("en-IN", {maximumFractionDigits:0});
+  }catch(e){}
+  const hasDpcr = Object.values(by).some(l => l.some(p => p.dpcr != null));
+  document.getElementById("chartEmptyMsgSensex").style.display = hasDpcr ? "none" : "block";
+  if(!Object.values(by).some(l => l.length)) return;
+  setFeedLine("feedSensex", by);   // v-DASH7
+  setReadout("dpcrSensexReadout", by);
+  const ssp = spotPoints(by);
+  // v-DASH7: if the separate /sensex_spot feed has nothing yet, show the
+  // latest spot from the DPCR readings instead of "--".
+  const sEl = document.getElementById("sensexReadout");
+  if(sEl.textContent.trim() === "--" && ssp.length)
+    sEl.textContent = Math.round(ssp[ssp.length-1].v).toLocaleString("en-IN");
+  drawDpcrChart("chartDpcrSensex", by);
+  drawLineChart("chartSensexSpot", ssp, {color:"var(--green)", decimals:0});
+}
+
+async function pollBotGBankNifty(){
+  let by;
+  try{ by = await fetchV2("/banknifty_series_v2"); }catch(e){ return pollBotGBankNiftyLegacy(); }
+  const has = Object.values(by).some(l => l.length);
+  BN_HAS_SERIES = has;   // v-DASH7: panel shown only once BankNifty reports
+  document.getElementById("chartEmptyMsgBankNifty").style.display = has ? "none" : "block";
+  if(!has) return;
+  drawDpcrChart("chartDpcrBankNifty", by);
+  drawLineChart("chartBankNiftySpot", spotPoints(by), {color:"var(--green)", decimals:0});
+}
+
+// ── legacy single-series versions (old backend without _v2 endpoints) ──
+async function pollBotGLegacy(){
+  try{
+    const r = await fetch(`${backendUrl}/botg_series`, {cache:"no-store"});
+    const series = await r.json();
+    document.getElementById("chartEmptyMsg").style.display = series.length ? "none" : "block";
+    if(!series.length) return;
+
+    // v-DASH4: big current-value readout, explicit instruction -- the
+    // small chart's y-axis labels are hard to read at a glance. Latest
+    // point in the series is the most recent reading; color the DPCR
+    // number to match the chart's reference-line semantics (>=1.0 vs <1.0)
+    // rather than a fixed amber, so the readout itself signals direction.
+    const latest = series[series.length - 1];
+    const dpcrEl = document.getElementById("dpcrReadout");
+    dpcrEl.textContent = latest.dpcr.toFixed(2);
+    dpcrEl.style.color = latest.dpcr >= 1.0 ? "var(--green)" : "var(--red)";
+    document.getElementById("niftyReadout").textContent = Math.round(latest.nifty_spot).toLocaleString("en-IN");
+
+    const toHHMM = ts => new Date(ts*1000).toTimeString().slice(0,5);
+    const dpcrPoints  = series.map(s=>({t: toHHMM(s.time), v: s.dpcr}));
+    const niftyPoints = series.map(s=>({t: toHHMM(s.time), v: s.nifty_spot}));
+
+    drawLineChart("chartDpcr",  dpcrPoints,  {color:"var(--amber)", decimals:2, includeRef:1.0});
+    drawLineChart("chartNifty", niftyPoints, {color:"var(--green)", decimals:0});
+  }catch(e){
+    // backend not reachable -- the main connDot indicator already surfaces this,
+    // no need to duplicate the error state here.
+  }
+}
+
+// v-SG4: mirrors pollBotG() exactly, reading the SEPARATE /sensex_series
+// endpoint (own ring buffer on the backend, never mixed with Nifty's) --
+// the Sensex BOT_G/BOT_GG process posts here via send_botg_reading(),
+// fixed to target /sensex_reading instead of Nifty's /botg_reading.
+async function pollBotGSensexLegacy(){
+  try{
+    const [seriesResp, spotResp] = await Promise.all([
+      fetch(`${backendUrl}/sensex_series`, {cache:"no-store"}),
+      fetch(`${backendUrl}/sensex_spot`, {cache:"no-store"})
+    ]);
+    const series = await seriesResp.json();
+    const spotState = await spotResp.json();
+    const validDpcrSeries = series.filter(s => s.dpcr != null && Number.isFinite(Number(s.dpcr)));
+    document.getElementById("chartEmptyMsgSensex").style.display = validDpcrSeries.length ? "none" : "block";
+
+    const spotEl = document.getElementById("sensexReadout");
+    if (spotState && spotState.sensex_spot != null) {
+      spotEl.textContent = Number(spotState.sensex_spot).toLocaleString("en-IN", {maximumFractionDigits:0});
+    }
+    if(!series.length) return;
+
+    const toHHMM = ts => new Date(ts*1000).toTimeString().slice(0,5);
+    const latestDpcr = validDpcrSeries.length ? validDpcrSeries[validDpcrSeries.length-1] : null;
+    const dpcrEl = document.getElementById("dpcrSensexReadout");
+    if (latestDpcr) {
+      dpcrEl.textContent = Number(latestDpcr.dpcr).toFixed(2);
+      dpcrEl.style.color = Number(latestDpcr.dpcr) >= 1.0 ? "var(--green)" : "var(--red)";
+    } else {
+      dpcrEl.textContent = "--";
+      dpcrEl.style.color = "var(--amber)";
+    }
+    const dpcrPoints = validDpcrSeries.map(s=>({t: toHHMM(s.time), v: Number(s.dpcr)}));
+    const sensexPoints = series.filter(s => s.sensex_spot != null).map(s=>({t: toHHMM(s.time), v: Number(s.sensex_spot)}));
+    drawLineChart("chartDpcrSensex", dpcrPoints, {color:"var(--amber)", decimals:2, includeRef:1.0});
+    drawLineChart("chartSensexSpot", sensexPoints, {color:"var(--green)", decimals:0});
+  }catch(e){
+    // fail-soft; connection indicator surfaces backend issues
+  }
+}
+// v-BN3: mirrors pollBotGSensex() exactly, reading the SEPARATE
+// /banknifty_series endpoint -- own ring buffer, never mixed with
+// Nifty's or Sensex's. The BankNifty BOT_G/BOT_GG process posts here via
+// its own send_botg_reading(), targeting /banknifty_reading.
+async function pollBotGBankNiftyLegacy(){
+  try{
+    const r = await fetch(`${backendUrl}/banknifty_series`, {cache:"no-store"});
+    const series = await r.json();
+    document.getElementById("chartEmptyMsgBankNifty").style.display = series.length ? "none" : "block";
+    if(!series.length) return;
+
+    const toHHMM = ts => new Date(ts*1000).toTimeString().slice(0,5);
+    const dpcrPoints      = series.map(s=>({t: toHHMM(s.time), v: s.dpcr}));
+    const bankniftyPoints = series.map(s=>({t: toHHMM(s.time), v: s.banknifty_spot}));
+
+    drawLineChart("chartDpcrBankNifty",  dpcrPoints,      {color:"var(--amber)", decimals:2, includeRef:1.0});
+    drawLineChart("chartBankNiftySpot",  bankniftyPoints, {color:"var(--green)", decimals:0});
+  }catch(e){
+    // same fail-soft as pollBotG()/pollBotGSensex()
+  }
+}
+
+// v-DASH2: known instrument list for the BOT_G grid below. Any bot_id NOT
+// matching {INSTRUMENT}_{BROKER}_G falls through to the OTHER section,
+// rendered the old flat-row way -- so a naming change or a new bot never
+// silently disappears from the dashboard, it just lands outside the grid
+// until this list is updated.
+// v-DASH4: dropped the old BOT A-F "BROKER COMPARISON" grid and the
+// BOT_GG column entirely -- neither exists right now (explicit
+// instruction). Also fixed the matching pattern itself: it previously
+// only checked {INSTRUMENT}_FYERS_{G/GG}, which is why a real, running
+// RMoney BOT_G (id NIFTY_RMONEY_G) was falling through to OTHER instead
+// of showing in this grid. Now checks both brokers, for BOT_G only.
+const GG_INSTRUMENTS = ["NIFTY", "SENSEX", "BANKNIFTY"];
+const GG_BROKERS = ["FYERS", "RMONEY"];
+// v-DASH6 (14-Oct-2026): one grid row per entry slot -- G (10:15 slot) and
+// GE (09:45-10:14 early slot). A GE row appears only once some GE bot for
+// that instrument has reported, so BankNifty etc. stay one row.
+const GG_SLOTS = [["G", ""], ["GE", " · early"]];
+
+function statusDotColor(d){
+  if(d.stale) return "var(--text-dim)";
+  if(d.command==="halt") return "var(--red)";
+  return (d.pnl||0) >= 0 ? "var(--green)" : "var(--red)";
+}
+
+function brokerCellHtml(id, d){
+  if(!d){
+    return `<td><div class="broker-cell">
+      <span class="pnl-wrap" style="color:var(--text-dim)">
+        <span class="d" style="background:var(--text-dim)"></span>not reporting
+      </span>
+    </div></td>`;
+  }
+  // v-DASH7: a stale or halted bot no longer looks healthy -- before, it
+  // kept showing its last P/L with only a grey dot. Last known P/L is
+  // still shown, dimmed, after the warning.
+  let body;
+  if(d.stale){
+    body = `<span class="pnl-wrap down"><span class="d" style="background:var(--red)"></span>
+      <span class="cell-alert">NO SIGNAL · ${ageText(Date.now()/1000 - (d.last_seen||0))}</span>
+      <span style="color:var(--text-dim)">(${fmt(d.pnl||0)})</span></span>`;
+  } else if(d.command === "halt"){
+    body = `<span class="pnl-wrap down"><span class="d" style="background:var(--red)"></span>
+      <span class="cell-alert">HALTED</span>
+      <span style="color:var(--text-dim)">(${fmt(d.pnl||0)})</span></span>`;
+  } else {
+    body = `<span class="pnl-wrap ${d.pnl>=0?'up':'down'}">
+      <span class="d" style="background:${statusDotColor(d)}"></span>${fmt(d.pnl||0)}
+    </span>`;
+  }
+  return `<td><div class="broker-cell">
+    ${body}
+    <button class="kill-cell" onclick="killOne('${id}')" title="Kill ${id}">⏻</button>
+  </div></td>`;
+}
+
+// v-DASH7: BankNifty is shown only once it reports -- either a heartbeat
+// from a BANKNIFTY_* bot or a BankNifty DPCR reading. Nothing to maintain
+// if BankNifty comes back later; it reappears on its own.
+let BN_HAS_SERIES = false;
+let LAST_STATUS = {};
+function updateBankNiftyVisibility(){
+  const hasBot = Object.keys(LAST_STATUS).some(id => id.startsWith("BANKNIFTY_"));
+  const show = hasBot || BN_HAS_SERIES;
+  document.getElementById("bnPanel").style.display = show ? "block" : "none";
+  document.getElementById("bottomRow").classList.toggle("three", show);
+}
+
+// v-DASH7: polling split in two. P/L/status every 2 s as before; the DPCR
+// and spot charts every 20 s, since bots post one reading per 3-min candle
+// (re-fetching every 2 s just re-downloaded the same data). Each loop waits
+// for its own previous request to finish before scheduling the next one,
+// so a slow backend can no longer pile up overlapping requests.
+const STATUS_EVERY_MS = 2000, CHARTS_EVERY_MS = 20000;
+async function pollCharts(){
+  await Promise.allSettled([pollBotG(), pollBotGSensex(), pollBotGBankNifty()]);
+  updateBankNiftyVisibility();
+}
+async function statusLoop(){ try{ await pollStatus(); }catch(e){} setTimeout(statusLoop, STATUS_EVERY_MS); }
+async function chartLoop(){ try{ await pollCharts(); }catch(e){} setTimeout(chartLoop, CHARTS_EVERY_MS); }
+
+async function pollStatus(){
+  let data;
+  try{
+    const r = await fetch(`${backendUrl}/status`, {cache:"no-store"});
+    data = await r.json();
+    document.getElementById("connDot").innerHTML = '<span class="dot ok"></span>connected';
+  }catch(e){
+    document.getElementById("connDot").innerHTML = '<span class="dot bad"></span>backend not reachable';
+    return;
+  }
+  LAST_STATUS = data;
+  updateBankNiftyVisibility();
+
+  const allIds = Object.keys(data);
+  document.getElementById("emptyMsg").style.display = allIds.length ? "none" : "block";
+
+  let total = 0;
+  allIds.forEach(id => total += data[id].pnl || 0);
+
+  const knownIds = new Set();
+
+  // v-DASH4: BOT_G grid -- FYERS + RMONEY columns, per instrument. Matches
+  // {INSTRUMENT}_{BROKER}_G exactly (fixed from the old {INSTRUMENT}_FYERS_
+  // {G/GG} pattern, which silently missed every real RMoney BOT_G report).
+  let ggGridHtml = "";
+  for(const instr of GG_INSTRUMENTS){
+    for(const [slot, label] of GG_SLOTS){
+      const ids = GG_BROKERS.map(b => `${instr}_${b}_${slot}`);
+      ids.forEach(id => knownIds.add(id));
+      if(slot !== "G" && !ids.some(id => data[id])) continue;   // v-DASH6
+      if(instr === "BANKNIFTY" && !ids.some(id => data[id])) continue;   // v-DASH7: hide unless reporting
+      ggGridHtml += `<tr><td class="instrument-cell">${instr}<span style="color:var(--text-dim);font-weight:500">${label}</span></td>`;
+      ids.forEach(id => ggGridHtml += brokerCellHtml(id, data[id]));
+      ggGridHtml += `</tr>`;
+    }
+  }
+  document.getElementById("ggRows").innerHTML = ggGridHtml;
+
+  const otherIds = allIds.filter(id => !knownIds.has(id));
+  document.getElementById("otherWrap").style.display = otherIds.length ? "block" : "none";
+  document.getElementById("otherRows").innerHTML = otherIds.map(id=>{
+    const d = data[id];
+    let stCls, stLabel;
+    if(d.stale){ stCls="st-stale"; stLabel="NO SIGNAL"; }
+    else if(d.command==="halt"){ stCls="st-halt"; stLabel="HALTED"; }
+    else{ stCls="st-run"; stLabel="RUNNING"; }
+    return `<tr>
+      <td class="bot-id">${id}</td>
+      <td><span class="status ${stCls}"><span class="d"></span>${stLabel}</span></td>
+      <td class="pnl ${d.pnl>=0?'up':'down'}">${fmt(d.pnl||0)}</td>
+      <td style="color:var(--text-dim)">${timeAgo(d.last_seen)}</td>
+      <td><button class="kill-one" onclick="killOne('${id}')">KILL</button></td>
+    </tr>`;
+  }).join("");
+
+  const el = document.getElementById("combinedPnl");
+  el.textContent = fmt(total);
+  el.style.color = total>=0 ? "var(--green)" : "var(--red)";
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// v-DASH8 (30-Oct-2026): P/L CURVES tab. Reads GET /pnl_history
+// ({bot_id: [[epoch, pnl], ...]}, one point per bot per ~30 s, booked +
+// open-trade P/L as each bot reports it). The latest live value from
+// /status is added as the final point so each line ends at "now".
+// Fetched only while this tab is open (every 30 s), so the Live tab's
+// load is unchanged.
+let ACTIVE_TAB = "live";
+const PNL_EVERY_MS = 30000;
+const SLOT_MARKS = [["09:45","early"], ["10:15","main"]];
+
+function showTab(t){
+  ACTIVE_TAB = t;
+  hvClear();   // v-DASH9
+  document.getElementById("tabLive").style.display = t === "live" ? "block" : "none";
+  document.getElementById("tabPnl").style.display  = t === "pnl"  ? "block" : "none";
+  document.getElementById("tabBtnLive").classList.toggle("active", t === "live");
+  document.getElementById("tabBtnPnl").classList.toggle("active", t === "pnl");
+  if(t === "pnl") pollPnl();
+}
+
+function todayAt(hhmm){
+  const [h,m] = hhmm.split(":").map(Number);
+  const d = new Date(); d.setHours(h, m, 0, 0);
+  return d.getTime()/1000;
+}
+function fmtShort(n){
+  const a = Math.abs(n), s = n > 0 ? "+" : n < 0 ? "−" : "";
+  return s + "₹" + (a >= 1000 ? (a/1000).toFixed(a >= 10000 ? 0 : 1) + "k" : Math.round(a));
+}
+
+// One P/L line chart. series: [{pts:[[t,v],...], color}]. Time axis is the
+// trading day (09:15-15:30, widened if data falls outside), y always
+// includes 0 (dashed). opts.hiLo marks the day high/low on series[0].
+function drawPnlChart(svgId, series, opts){
+  const svg = document.getElementById(svgId);
+  const W = opts.W, H = opts.H, padL = 64, padR = 12, padT = 12, padB = 24;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+  const all = series.flatMap(s => s.pts);
+  if(!all.length){ svg.innerHTML = ""; hvUnregister(svgId); return; }
+  let tmin = todayAt("09:15"), tmax = todayAt("15:30");
+  all.forEach(p => { tmin = Math.min(tmin, p[0]); tmax = Math.max(tmax, p[0]); });
+  let vmin = Math.min(0, ...all.map(p => p[1])), vmax = Math.max(0, ...all.map(p => p[1]));
+  if(vmax === vmin){ vmax += 500; vmin -= 500; }
+  const pad = (vmax-vmin)*0.1; vmin -= pad; vmax += pad;
+  const x = t => padL + ((t-tmin)/(tmax-tmin))*plotW;
+  const y = v => padT + plotH - ((v-vmin)/(vmax-vmin))*plotH;
+  let s = "";
+  // hourly ticks
+  for(let h = 10; h <= 15; h++){
+    const t = todayAt(String(h).padStart(2,"0") + ":00");
+    if(t < tmin || t > tmax) continue;
+    s += `<line class="gridline" x1="${x(t).toFixed(1)}" y1="${padT}" x2="${x(t).toFixed(1)}" y2="${padT+plotH}"/>`;
+    s += `<text class="axistext" x="${x(t).toFixed(1)}" y="${H-5}" text-anchor="middle">${h}:00</text>`;
+  }
+  if(opts.slotMarks){
+    SLOT_MARKS.forEach(([hm, lab]) => {
+      const t = todayAt(hm); if(t < tmin || t > tmax) return;
+      s += `<line class="slotline" x1="${x(t).toFixed(1)}" y1="${padT}" x2="${x(t).toFixed(1)}" y2="${padT+plotH}"/>`;
+      s += `<text class="slottext" x="${(x(t)+4).toFixed(1)}" y="${padT+12}">${hm} ${lab}</text>`;
+    });
+  }
+  s += `<line class="refline" x1="${padL}" y1="${y(0).toFixed(1)}" x2="${W-padR}" y2="${y(0).toFixed(1)}"/>`;
+  s += `<text class="axistext" x="${padL-8}" y="${(y(0)+4).toFixed(1)}" text-anchor="end">0</text>`;
+  // skip a min/max label that would sit on top of the "0" label
+  if(Math.abs(y(0) - (padT+6)) > 16)
+    s += `<text class="axistext" x="${padL-8}" y="${padT+10}" text-anchor="end">${fmtShort(vmax)}</text>`;
+  if(Math.abs(y(0) - (padT+plotH-4)) > 16)
+    s += `<text class="axistext" x="${padL-8}" y="${padT+plotH}" text-anchor="end">${fmtShort(vmin)}</text>`;
+  s += `<line class="axisline" x1="${padL}" y1="${padT+plotH}" x2="${W-padR}" y2="${padT+plotH}"/>`;
+  series.forEach(se => {
+    if(!se.pts.length) return;
+    const d = se.pts.map((p,i) => (i ? "L" : "M") + x(p[0]).toFixed(1) + "," + y(p[1]).toFixed(1)).join(" ");
+    s += `<path class="datapath" d="${d}" stroke="${se.color}" stroke-width="${opts.lineW || 1.8}"/>`;
+  });
+  if(opts.hiLo && series[0].pts.length){
+    const pts = series[0].pts;
+    let hi = pts[0], lo = pts[0];
+    pts.forEach(p => { if(p[1] > hi[1]) hi = p; if(p[1] < lo[1]) lo = p; });
+    s += `<circle cx="${x(hi[0]).toFixed(1)}" cy="${y(hi[1]).toFixed(1)}" r="4" fill="var(--green)"/>`;
+    s += `<circle cx="${x(lo[0]).toFixed(1)}" cy="${y(lo[1]).toFixed(1)}" r="4" fill="var(--red)"/>`;
+  }
+  svg.innerHTML = s;
+  hvRegister(svgId, {kind:"pnl", order:1, padL, plotW, tmin, tmax, x, y, series});   // v-DASH9
+}
+
+// Sum of all bots over time: walk every sample in time order, carrying each
+// bot's last known value (a bot with no sample yet counts as 0).
+function combinedSeries(hist){
+  const ev = [];
+  Object.entries(hist).forEach(([id, pts]) => pts.forEach(p => ev.push([p[0], id, p[1]])));
+  ev.sort((a,b) => a[0]-b[0]);
+  const last = {}; let total = 0; const out = [];
+  ev.forEach(([t, id, v]) => {
+    total += v - (last[id] || 0); last[id] = v;
+    if(out.length && t - out[out.length-1][0] < 1) out[out.length-1][1] = total;
+    else out.push([t, total]);
+  });
+  return out;
+}
+
+function hhmm(t){ return toHHMM(t); }
+
+async function pollPnl(){
+  const empty = document.getElementById("pnlEmptyMsg");
+  let hist;
+  try{
+    const r = await fetch(`${backendUrl}/pnl_history`, {cache:"no-store"});
+    if(!r.ok) throw new Error("old backend");
+    hist = await r.json();
+  }catch(e){
+    empty.style.display = "block";
+    empty.textContent = "P/L history not available. This tab needs backend v-DASH8 running (backend_vDASH8.py).";
+    document.getElementById("pnlCombined").innerHTML = "";
+    document.getElementById("pnlGrid").innerHTML = "";
+    document.getElementById("pnlStats").innerHTML = "";
+    return;
+  }
+  // finish each line at the live value from the latest /status poll
+  const now = Date.now()/1000;
+  Object.entries(LAST_STATUS).forEach(([id, d]) => {
+    if(d.stale || d.pnl == null) return;
+    const l = hist[id] || (hist[id] = []);
+    if(!l.length || now - l[l.length-1][0] > 1) l.push([now, Number(d.pnl)]);
+  });
+  const comb = combinedSeries(hist);
+  empty.style.display = comb.length ? "none" : "block";
+  if(!comb.length){
+    empty.textContent = "No P/L history yet today. Points appear every 30 s once bots are running.";
+    return;
+  }
+  let hi = comb[0], lo = comb[0];
+  comb.forEach(p => { if(p[1] > hi[1]) hi = p; if(p[1] < lo[1]) lo = p; });
+  const cur = comb[comb.length-1][1];
+  const col = v => v >= 0 ? "var(--green)" : "var(--red)";
+  document.getElementById("pnlStats").innerHTML =
+    `<span><span class="lab">NOW</span><span style="color:${col(cur)}">${fmt(cur)}</span></span>` +
+    `<span><span class="lab">DAY HIGH</span><span style="color:${col(hi[1])}">${fmt(hi[1])}</span><span class="tm">${hhmm(hi[0])}</span></span>` +
+    `<span><span class="lab">DAY LOW</span><span style="color:${col(lo[1])}">${fmt(lo[1])}</span><span class="tm">${hhmm(lo[0])}</span></span>` +
+    `<span><span class="lab">GIVEN BACK FROM HIGH</span>${fmt(cur - hi[1])}</span>`;
+  drawPnlChart("pnlCombined", [{pts: comb, color: "var(--green)", name: "Combined"}],
+               {W:1200, H:280, hiLo:true, slotMarks:true, lineW:2.2});
+
+  // one card per instrument + slot that has data, Fyers vs RMoney
+  let html = "", cards = [];
+  for(const instr of GG_INSTRUMENTS){
+    for(const [slot, label] of GG_SLOTS){
+      const f = `${instr}_FYERS_${slot}`, r = `${instr}_RMONEY_${slot}`;
+      if(!(hist[f] && hist[f].length) && !(hist[r] && hist[r].length)) continue;
+      const id = `pnlCard_${instr}_${slot}`;
+      cards.push([id, f, r]);
+      const fv = hist[f] && hist[f].length ? hist[f][hist[f].length-1][1] : null;
+      const rv = hist[r] && hist[r].length ? hist[r][hist[r].length-1][1] : null;
+      const foot = [fv != null ? `F ${fmt(fv)}` : "F —", rv != null ? `R ${fmt(rv)}` : "R —"];
+      if(fv != null && rv != null) foot.push(`gap F−R ${fmt(fv - rv)}`);
+      html += `<div class="chartblock"><h2>${instr}${label.toUpperCase()}</h2>
+        <svg class="pnlsmall" id="${id}" viewBox="0 0 600 150"></svg>
+        <div class="pnlcard-foot">${foot.join(" · ")}</div></div>`;
+    }
+  }
+  document.getElementById("pnlGrid").innerHTML = html;
+  cards.forEach(([id, f, r]) => drawPnlChart(id,
+    [{pts: hist[f] || [], color: "var(--amber)", name: "Fyers"}, {pts: hist[r] || [], color: "var(--cyan)", name: "RMoney"}],
+    {W:600, H:150}));
+}
+async function pnlLoop(){
+  try{ if(ACTIVE_TAB === "pnl") await pollPnl(); }catch(e){}
+  setTimeout(pnlLoop, PNL_EVERY_MS);
+}
+
+// v-DASH7: kept so anything else calling poll() still refreshes everything.
+function poll(){ pollStatus(); pollCharts(); if(ACTIVE_TAB === "pnl") pollPnl(); }
+
+// ─────────────────────────────────────────────────────────────────────
+// v-DASH9 (03-Nov-2026): HOVER values on every chart.
+//  - DPCR + spot charts of one instrument share ONE crosshair: hovering
+//    either draws the same moment on both, and one box shows time, F/R
+//    signed DPCR, F/R raw and spot.
+//  - Snaps to the nearest real reading (one per 3-min candle) -- never a
+//    value made up between two points. Each broker uses its own nearest
+//    reading; if it has none within HV_TOL_SEC, it shows "—" so a gap in
+//    one broker's feed is visible.
+//  - P/L charts: value of each line at that time (last sample at or before
+//    it), plus the F−R gap on the per-instrument cards.
+//  - Each draw function registers its chart here; after the 20 s / 30 s
+//    redraws the crosshair is re-applied, so it does not flicker away.
+//  - One document-level listener (pointer events = mouse and touch), so the
+//    P/L cards that are rebuilt every 30 s need no re-wiring.
+const HV = {};                 // svgId -> chart meta
+const HV_GROUP = {chartDpcr:"nifty", chartNifty:"nifty",
+  chartDpcrSensex:"sensex", chartSensexSpot:"sensex",
+  chartDpcrBankNifty:"bn", chartBankNiftySpot:"bn"};
+const HV_TOL_SEC = 200;        // a bit over one 3-min candle
+let HVS = null;                // {group, t, cx, cy}
+
+function hvGroupOf(id){ return HV_GROUP[id] || id; }
+function hvRegister(svgId, meta){
+  const svg = document.getElementById(svgId);
+  if(!svg) return;
+  meta.svgId = svgId;
+  HV[svgId] = meta;
+  svg.dataset.hv = hvGroupOf(svgId);
+  svg.style.cursor = "crosshair";
+  if(HVS && HVS.group === svg.dataset.hv) hvRender();
+}
+function hvUnregister(svgId){
+  delete HV[svgId];
+  const svg = document.getElementById(svgId);
+  if(svg) delete svg.dataset.hv;
+}
+function hvTimes(m){
+  if(m.kind === "dpcr") return Object.values(m.by).flat().map(p => p.time);
+  if(m.kind === "spot") return m.pts.map(p => p.ts);
+  return m.series.flatMap(s => s.pts.map(p => p[0]));
+}
+function hvNearest(arr, t, getT){
+  let best = null, bd = Infinity;
+  for(const p of arr){ const d = Math.abs(getT(p) - t); if(d < bd){ bd = d; best = p; } }
+  return best && bd <= HV_TOL_SEC ? best : null;
+}
+function hvAtOrBefore(pts, t){
+  let v = null;
+  for(const p of pts){ if(p[0] <= t + 0.5) v = p; else break; }
+  if(!v && pts.length && pts[0][0] - t <= 60) v = pts[0];
+  return v;
+}
+const hvSign = v => (v >= 0 ? "+" : "") + Number(v).toFixed(2);
+
+function hvClear(){
+  HVS = null;
+  document.getElementById("hvTip").style.display = "none";
+  document.querySelectorAll("svg g.hvg").forEach(g => g.remove());
+}
+
+function hvRender(){
+  if(!HVS) return;
+  const t = HVS.t, metas = Object.values(HV)
+    .filter(m => hvGroupOf(m.svgId) === HVS.group && document.getElementById(m.svgId))
+    .sort((a,b) => a.order - b.order);
+  if(!metas.length){ hvClear(); return; }
+  // remove every crosshair first, so moving from one chart group to another
+  // never leaves the old group's line behind
+  document.querySelectorAll("svg g.hvg").forEach(g => g.remove());
+  const lines = [`<span class="hvt">${toHHMM(t)}</span>`];
+  metas.forEach(m => {
+    const svg = document.getElementById(m.svgId);
+    let g = "";
+    const inRange = t >= m.tmin - HV_TOL_SEC && t <= m.tmax + HV_TOL_SEC;
+    if(inRange){
+      const X = m.x(Math.max(m.tmin, Math.min(m.tmax, t))).toFixed(1);
+      g += `<line class="hvline" x1="${X}" y1="0" x2="${X}" y2="${svg.viewBox.baseVal.height - 16}"/>`;
+    }
+    if(m.kind === "dpcr"){
+      const main = [], raw = [];
+      ["FYERS","RMONEY","UNKNOWN"].forEach(b => {
+        if(!m.by[b]) return;
+        const tag = b === "UNKNOWN" ? "?" : b[0];
+        const col = BROKER_COLORS[b] || "var(--text)";
+        const p = hvNearest(m.by[b], t, q => q.time);
+        if(!p){ main.push(`<span style="color:${col}">${tag} —</span>`); return; }
+        main.push(`<span style="color:${col}">${tag} ${hvSign(p.dpcr)}</span>`);
+        if(p.raw != null) raw.push(`${tag} ${Number(p.raw).toFixed(2)}`);
+        g += `<circle cx="${m.x(p.time).toFixed(1)}" cy="${m.y(p.dpcr).toFixed(1)}" r="3.5" fill="${col}"/>`;
+      });
+      lines.push(`DPCR ${main.join(" · ")}`);
+      if(raw.length) lines.push(`<span class="hvt">raw ${raw.join(" · ")}</span>`);
+    } else if(m.kind === "spot"){
+      const p = hvNearest(m.pts, t, q => q.ts);
+      if(p){
+        lines.push(`Spot <span style="color:var(--green)">${Math.round(p.v).toLocaleString("en-IN")}</span>`);
+        g += `<circle cx="${m.x(p.ts).toFixed(1)}" cy="${m.y(p.v).toFixed(1)}" r="3.5" fill="var(--green)"/>`;
+      } else lines.push(`Spot —`);
+    } else {
+      const vals = [];
+      m.series.forEach(s => {
+        const p = hvAtOrBefore(s.pts, t);
+        if(!p){ lines.push(`<span style="color:${s.color}">${s.name || ""}</span> —`); vals.push(null); return; }
+        vals.push(p[1]);
+        const c = p[1] >= 0 ? "var(--green)" : "var(--red)";
+        lines.push(`<span style="color:${s.color}">${s.name || ""}</span> <span style="color:${c}">${fmt(p[1])}</span>`);
+        if(inRange) g += `<circle cx="${m.x(Math.min(m.tmax, t)).toFixed(1)}" cy="${m.y(p[1]).toFixed(1)}" r="4" fill="${s.color}"/>`;
+      });
+      if(vals.length === 2 && vals[0] != null && vals[1] != null)
+        lines.push(`<span class="hvt">gap F−R</span> ${fmt(vals[0] - vals[1])}`);
+    }
+    svg.insertAdjacentHTML("beforeend", `<g class="hvg" pointer-events="none">${g}</g>`);
+  });
+  const tip = document.getElementById("hvTip");
+  tip.innerHTML = lines.join("<br>");
+  tip.style.display = "block";
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let left = HVS.cx + 16, top = HVS.cy + 16;
+  if(left + w > window.innerWidth - 8) left = HVS.cx - w - 16;
+  if(top + h > window.innerHeight - 8) top = HVS.cy - h - 16;
+  tip.style.left = Math.max(4, left) + "px";
+  tip.style.top = Math.max(4, top) + "px";
+}
+
+function hvOnMove(ev){
+  const svg = ev.target && ev.target.closest ? ev.target.closest("svg[data-hv]") : null;
+  if(!svg || !HV[svg.id]){ if(HVS) hvClear(); return; }
+  const m = HV[svg.id];
+  const ctm = svg.getScreenCTM();
+  if(!ctm) return;
+  const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+  const vx = pt.matrixTransform(ctm.inverse()).x;
+  const tRaw = m.tmin + ((vx - m.padL)/m.plotW)*(m.tmax - m.tmin);
+  const times = hvTimes(m);
+  if(!times.length) return;
+  let t = times[0], bd = Infinity;
+  for(const tt of times){ const d = Math.abs(tt - tRaw); if(d < bd){ bd = d; t = tt; } }
+  HVS = {group: hvGroupOf(svg.id), t, cx: ev.clientX, cy: ev.clientY};
+  hvRender();
+}
+document.addEventListener("pointermove", hvOnMove);
+document.addEventListener("pointerleave", hvClear);
+window.addEventListener("blur", hvClear);
+window.addEventListener("scroll", () => { if(HVS) hvClear(); }, {passive:true});
+
+statusLoop();
+chartLoop();
+pnlLoop();
+</script>
+</body>
+</html>
