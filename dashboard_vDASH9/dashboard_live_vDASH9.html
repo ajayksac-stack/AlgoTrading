@@ -86,6 +86,27 @@
   .feedline .late{color:var(--red); font-weight:600;}
   /* v-DASH7: a bot that stopped reporting / was halted is shown plainly */
   .cell-alert{font-weight:600; letter-spacing:.3px;}
+  .process-manager{margin-bottom:20px; padding:16px; background:var(--panel);
+    border:1px solid var(--line); border-radius:3px;}
+  .process-heading{display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px;}
+  .process-heading h2{font-family:'Inter',sans-serif; font-size:13px; letter-spacing:1.5px;
+    color:var(--text-dim); font-weight:600; margin:0 0 5px;}
+  .process-note{font-family:'Inter',sans-serif; font-size:12px; color:var(--text-dim);}
+  .process-table{font-size:14px;}
+  .process-table th,.process-table td{padding:10px 12px;}
+  .process-state{font-family:'Inter',sans-serif; font-weight:600; letter-spacing:.4px;}
+  .process-running{color:var(--green);}
+  .process-stopped{color:var(--red);}
+  .process-other{color:var(--amber);}
+  .process-start,.process-refresh{font-family:'Inter',sans-serif; font-size:12px; font-weight:600;
+    letter-spacing:.5px; background:transparent; border:1px solid var(--line); color:var(--text);
+    padding:7px 12px; border-radius:2px; cursor:pointer;}
+  .process-start{border-color:var(--green); color:var(--green);}
+  .process-start:hover:not(:disabled){background:var(--green); color:#000;}
+  .process-start:disabled{opacity:.45; cursor:not-allowed;}
+  .process-refresh:hover{border-color:var(--amber); color:var(--amber);}
+  .process-message{min-height:16px; margin-top:8px; font-family:'Inter',sans-serif;
+    font-size:12px; color:var(--text-dim);}
 
   /* v-DASH8: tabs + P/L curves page */
   .tabbar{display:flex; gap:8px; padding:12px 26px 0;}
@@ -147,7 +168,7 @@
 <header>
   <div class="brand">
     <h1>BOT CONTROL ROOM</h1>
-    <span>live view · kill switches only · restart = go run it in IntelliJ</span>
+    <span>live view · tmux process status · start stopped bots individually</span>
   </div>
   <div class="pnl-combined">
     <div class="label">COMBINED P/L</div>
@@ -185,6 +206,21 @@
 </main>
 
 <main id="tabLive">
+  <section class="process-manager">
+    <div class="process-heading">
+      <div>
+        <h2>BOT PROCESS STATUS</h2>
+        <div class="process-note">tmux process state and latest dashboard heartbeat; Start only launches a stopped bot.</div>
+      </div>
+      <button class="process-refresh" onclick="pollProcesses()">REFRESH</button>
+    </div>
+    <table class="process-table">
+      <thead><tr><th>BOT</th><th>TMUX WINDOW</th><th>PROCESS</th><th>HEARTBEAT</th><th>ACTION</th></tr></thead>
+      <tbody id="processRows"><tr><td colspan="5" class="process-note">Loading process status…</td></tr></tbody>
+    </table>
+    <div class="process-message" id="processMessage" role="status"></div>
+  </section>
+
   <div class="sectionlabel">BOT_G</div>
   <table class="broker-table">
     <tr><th>INSTRUMENT</th><th>FYERS</th><th>RMONEY</th></tr>
@@ -264,11 +300,11 @@
   </div>
 </main>
 
-<footer>v-DASH9 (03-Nov-2026): hover values on DPCR, spot and P/L charts · v-DASH8 P/L curves (needs backend v-DASH8) &nbsp;|&nbsp; refresh: P/L 2s, charts 20s, curves 30s &nbsp;|&nbsp; this page only reads status - it never launches or edits your bots</footer>
+<footer>v-DASH10: tmux process status + localhost-only per-bot Start controls &nbsp;|&nbsp; process status 2s, P/L 1s, charts 3s, curves 30s</footer>
 
 <script>
 let backendUrl = "http://localhost:8000";
-function saveUrl(){ backendUrl = document.getElementById("backendUrl").value.replace(/\/$/,""); poll(); }
+function saveUrl(){ backendUrl = document.getElementById("backendUrl").value.replace(/\/$/,""); poll(); pollProcesses(); }
 
 function fmt(n){
   const sign = n>=0 ? "+" : "−";
@@ -277,6 +313,110 @@ function fmt(n){
 function timeAgo(ts){
   const s = Math.round(Date.now()/1000 - ts);
   return s < 60 ? s+"s ago" : Math.round(s/60)+"m ago";
+}
+function setHtmlIfChanged(el, html){
+  if(el.innerHTML === html) return;
+  const template = document.createElement("template");
+  template.innerHTML = html;
+
+  function syncAttributes(current, desired){
+    Array.from(current.attributes).forEach(attr => {
+      if(!desired.hasAttribute(attr.name)) current.removeAttribute(attr.name);
+    });
+    Array.from(desired.attributes).forEach(attr => {
+      if(current.getAttribute(attr.name) !== attr.value)
+        current.setAttribute(attr.name, attr.value);
+    });
+  }
+  function syncChildren(current, desired){
+    const wanted = desired.childNodes;
+    for(let i=0; i<wanted.length; i++){
+      const source = wanted[i], target = current.childNodes[i];
+      if(!target){
+        current.appendChild(source.cloneNode(true));
+        continue;
+      }
+      if(target.nodeType !== source.nodeType ||
+         (target.nodeType === 1 && target.nodeName !== source.nodeName)){
+        current.replaceChild(source.cloneNode(true), target);
+        continue;
+      }
+      if(target.nodeType === 3 || target.nodeType === 8){
+        if(target.nodeValue !== source.nodeValue) target.nodeValue = source.nodeValue;
+      } else {
+        if(target.nodeType === 1) syncAttributes(target, source);
+        syncChildren(target, source);
+      }
+    }
+    while(current.childNodes.length > wanted.length) current.lastChild.remove();
+  }
+  syncChildren(el, template.content);
+}
+function setTextIfChanged(el, text){
+  if(el.textContent !== text) el.textContent = text;
+}
+
+const PROCESS_EVERY_MS = 2000;
+let PROCESS_STATUS = {};
+function heartbeatLabel(age){
+  if(age == null) return "NO HEARTBEAT";
+  return age < 60 ? `${Math.round(age)}s ago` : `${Math.round(age/60)}m ago`;
+}
+function renderProcesses(data){
+  PROCESS_STATUS = data;
+  const rows = Object.values(data).map(p=>{
+    const stateLabel = p.state === "running" ? "RUNNING"
+      : p.state === "stopped" ? "STOPPED" : "OTHER PROCESS";
+    const stateClass = p.state === "running" ? "process-running"
+      : p.state === "stopped" ? "process-stopped" : "process-other";
+    const heartbeat = p.heartbeat_recent
+      ? `<span class="process-running">${heartbeatLabel(p.heartbeat_age_sec)}</span>`
+      : `<span class="process-stopped">${heartbeatLabel(p.heartbeat_age_sec)}</span>`;
+    const canStart = p.state === "stopped";
+    const action = canStart
+      ? `<button class="process-start" onclick="startBot('${p.id}')">START</button>`
+      : `<button class="process-start" disabled>${p.state === "running" ? "RUNNING" : "UNAVAILABLE"}</button>`;
+    return `<tr>
+      <td class="bot-id">${p.label}</td>
+      <td>${p.window}</td>
+      <td><span class="process-state ${stateClass}">${stateLabel}</span></td>
+      <td>${heartbeat}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join("");
+  setHtmlIfChanged(document.getElementById("processRows"), rows);
+  setTextIfChanged(document.getElementById("processMessage"), "");
+}
+async function pollProcesses(){
+  try{
+    const r = await fetch(`${backendUrl}/processes`, {cache:"no-store"});
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    renderProcesses(data);
+  }catch(e){
+    setHtmlIfChanged(document.getElementById("processRows"),
+      '<tr><td colspan="5" class="process-stopped">Process status unavailable</td></tr>');
+    setTextIfChanged(document.getElementById("processMessage"), `Could not read tmux status: ${e.message}`);
+  }
+}
+async function startBot(processId){
+  const process = PROCESS_STATUS[processId];
+  if(!process || process.state !== "stopped") return;
+  if(!confirm(`Start ${process.label} in its tmux window?\n\nThe bot may place orders according to its configured trading mode.`)) return;
+  setTextIfChanged(document.getElementById("processMessage"), `Starting ${process.label}…`);
+  try{
+    const r = await fetch(`${backendUrl}/processes/${encodeURIComponent(processId)}/start`, {method:"POST"});
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    await pollProcesses();
+    setTextIfChanged(document.getElementById("processMessage"), `${process.label}: start requested.`);
+  }catch(e){
+    setTextIfChanged(document.getElementById("processMessage"), `Could not start ${process.label}: ${e.message}`);
+  }
+}
+async function processLoop(){
+  await pollProcesses();
+  setTimeout(processLoop, PROCESS_EVERY_MS);
 }
 
 // v-DASH7: confirm before a single kill too. The main (G) and early (GE)
@@ -696,12 +836,11 @@ function updateBankNiftyVisibility(){
   document.getElementById("bottomRow").classList.toggle("three", show);
 }
 
-// v-DASH7: polling split in two. P/L/status every 2 s as before; the DPCR
-// and spot charts every 20 s, since bots post one reading per 3-min candle
-// (re-fetching every 2 s just re-downloaded the same data). Each loop waits
-// for its own previous request to finish before scheduling the next one,
-// so a slow backend can no longer pile up overlapping requests.
-const STATUS_EVERY_MS = 2000, CHARTS_EVERY_MS = 20000;
+// Poll status and charts independently. Each loop waits for its own previous
+// request to finish before scheduling the next one, avoiding overlapping calls.
+const STATUS_EVERY_MS = 1000, CHARTS_EVERY_MS = 3000;
+const STATUS_FAILURE_LIMIT = 3;
+let STATUS_FAILURES = 0;
 async function pollCharts(){
   await Promise.allSettled([pollBotG(), pollBotGSensex(), pollBotGBankNifty()]);
   updateBankNiftyVisibility();
@@ -713,10 +852,14 @@ async function pollStatus(){
   let data;
   try{
     const r = await fetch(`${backendUrl}/status`, {cache:"no-store"});
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
     data = await r.json();
-    document.getElementById("connDot").innerHTML = '<span class="dot ok"></span>connected';
+    STATUS_FAILURES = 0;
+    setHtmlIfChanged(document.getElementById("connDot"), '<span class="dot ok"></span>connected');
   }catch(e){
-    document.getElementById("connDot").innerHTML = '<span class="dot bad"></span>backend not reachable';
+    STATUS_FAILURES++;
+    if(STATUS_FAILURES >= STATUS_FAILURE_LIMIT)
+      setHtmlIfChanged(document.getElementById("connDot"), '<span class="dot bad"></span>backend not reachable');
     return;
   }
   LAST_STATUS = data;
@@ -745,11 +888,11 @@ async function pollStatus(){
       ggGridHtml += `</tr>`;
     }
   }
-  document.getElementById("ggRows").innerHTML = ggGridHtml;
+  setHtmlIfChanged(document.getElementById("ggRows"), ggGridHtml);
 
   const otherIds = allIds.filter(id => !knownIds.has(id));
   document.getElementById("otherWrap").style.display = otherIds.length ? "block" : "none";
-  document.getElementById("otherRows").innerHTML = otherIds.map(id=>{
+  const otherRowsHtml = otherIds.map(id=>{
     const d = data[id];
     let stCls, stLabel;
     if(d.stale){ stCls="st-stale"; stLabel="NO SIGNAL"; }
@@ -763,10 +906,12 @@ async function pollStatus(){
       <td><button class="kill-one" onclick="killOne('${id}')">KILL</button></td>
     </tr>`;
   }).join("");
+  setHtmlIfChanged(document.getElementById("otherRows"), otherRowsHtml);
 
   const el = document.getElementById("combinedPnl");
-  el.textContent = fmt(total);
-  el.style.color = total>=0 ? "var(--green)" : "var(--red)";
+  setTextIfChanged(el, fmt(total));
+  const pnlColor = total>=0 ? "var(--green)" : "var(--red)";
+  if(el.style.color !== pnlColor) el.style.color = pnlColor;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -940,7 +1085,7 @@ async function pnlLoop(){
 }
 
 // v-DASH7: kept so anything else calling poll() still refreshes everything.
-function poll(){ pollStatus(); pollCharts(); if(ACTIVE_TAB === "pnl") pollPnl(); }
+function poll(){ pollStatus(); pollProcesses(); pollCharts(); if(ACTIVE_TAB === "pnl") pollPnl(); }
 
 // ─────────────────────────────────────────────────────────────────────
 // v-DASH9 (03-Nov-2026): HOVER values on every chart.
@@ -1089,6 +1234,7 @@ window.addEventListener("blur", hvClear);
 window.addEventListener("scroll", () => { if(HVS) hvClear(); }, {passive:true});
 
 statusLoop();
+processLoop();
 chartLoop();
 pnlLoop();
 </script>

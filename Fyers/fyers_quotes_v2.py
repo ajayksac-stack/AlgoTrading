@@ -1,3 +1,6 @@
+import os
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 import time
 from urllib import response
 from fyers_apiv3.FyersWebsocket import data_ws
@@ -8,7 +11,6 @@ import threading
 import json
 import helper_fyers as helper
 import traceback
-import os
 import sys
 
 ##############################################

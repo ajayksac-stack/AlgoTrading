@@ -481,6 +481,8 @@
 
 import json
 import os
+# Keep relative logs, state, data, and archive paths inside this broker folder.
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import csv
 import shutil
 import time

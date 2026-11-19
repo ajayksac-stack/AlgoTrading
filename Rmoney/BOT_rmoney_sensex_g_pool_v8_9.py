@@ -83,9 +83,10 @@
 #  v8.5 (2-Nov-2026) -- Anu: "1 yes" (gap 0.75 %), zip request (2-Nov 17:12). Two changes, nothing else:
 #    1. DAILY UPLOAD ZIP (V85_DAILY_ZIP, V85_ZIP_NAME): at shutdown (after "BOT SHUTDOWN COMPLETE") the bot writes
 #       upload_sensex_<YYYYMMDD>_<broker>.zip with: bot_log (+ rotations .txt.N), trades, summary, livecmp, trade_paths, post_exit_paths,
-#       post_exit_summary, vwap_research, pool_bars, pool_bars_10m, spot_bars, setup_tags, exit_whatif, zlm_shadow, dpcr_log, dpcr_window_shift,
-#       heartbeat. NEVER the token / client-id files or the bot_state json. The originals stay untouched. Files accumulate over the weekly
-#       series (same names), so the newest day is at the end. A hard kill (no shutdown) writes no zip -> upload the files the old way.
+#       post_exit_summary, vwap_research, pool_bars, pool_bars_10m, spot_bars, setup_tags, exit_whatif, zlm_shadow, option-chain log,
+#       dpcr_log, dpcr_window_shift, heartbeat. NEVER the token / client-id files or the bot_state json.
+#       On normal end-of-day shutdown, the verified zip is kept and bot-generated daily files (including bot_state) are deleted.
+#       A hard kill (no shutdown) writes no zip and deletes nothing.
 #    2. GAP-DAY THRESHOLD 1.0 % -> 0.75 % (BOTG_GAP_THRESHOLD_PCT, either direction, measured on the closed 09:15 candle as in v8.3.1). A gap day
 #       = early slot (BOT_GE) off, DPCR watch / first anchor at 10:00, first BOT_G trade 12:30. 2-Nov (+0.97 %) was a normal day and all
 #       five paper trades (11:15-12:26) lost; at 0.75 % the day would have had no trade before 12:30. First time this path runs live on Sensex.
@@ -6641,7 +6642,7 @@ def _v85_zip_members():
         _v = globals().get(_nm)
         if _v:
             out.append(_v)
-    for _nm in ("DPCR_LOG_FILE", "DPCR_SHIFT_LOG_FILE"):
+    for _nm in ("OC_LOG_FILE", "DPCR_LOG_FILE", "DPCR_SHIFT_LOG_FILE"):
         _v = getattr(_oc_filter, _nm, None)
         if _v:
             out.append(_v)
@@ -6676,7 +6677,7 @@ def _v85_daily_zip():
                 _z.write(_f, arcname=os.path.basename(_f))
         os.replace(tmp, zname)
         log(f"v8.5 ZIP | wrote {zname}: {len(files)} files, {os.path.getsize(zname) // 1024} KB -- upload this one file")
-        return zname
+        return zname, files
     except Exception as _e:
         try:
             if tmp and os.path.exists(tmp):
@@ -6688,6 +6689,52 @@ def _v85_daily_zip():
         except Exception:
             pass
         return None
+
+
+def _v86_eod_cleanup(zip_result):
+    """Delete Sensex daily outputs only after normal shutdown and verified archive creation."""
+    import zipfile
+    if not V86_EOD_CLEANUP:
+        log("v8.6 EOD CLEANUP | disabled -> nothing deleted")
+        return
+    if not SYSTEM_EXIT:
+        log("v8.6 EOD CLEANUP | not a normal end-of-day shutdown -> nothing deleted")
+        return
+    if not zip_result:
+        log("v8.6 EOD CLEANUP | no upload zip was written -> nothing deleted")
+        return
+
+    out, zipped = zip_result
+    try:
+        with zipfile.ZipFile(out) as z:
+            bad = z.testzip()
+            inside = set(z.namelist())
+        missing = [os.path.basename(name) for name in zipped if os.path.basename(name) not in inside]
+        if bad or missing:
+            log(f"v8.6 EOD CLEANUP | zip check FAILED (bad {bad}, missing {missing}) -> nothing deleted")
+            return
+    except Exception as e:
+        log(f"v8.6 EOD CLEANUP | zip check error {e} -> nothing deleted")
+        return
+
+    files = set(zipped) | {STATE_FILE, STATE_FILE + ".tmp"}
+    files = sorted(name for name in files if name and os.path.isfile(name) and os.path.dirname(name) == "")
+    log(f"v8.6 EOD CLEANUP | {out} verified ({len(inside)} files) -> deleting {len(files)} daily files")
+    try:
+        _logger.removeHandler(_log_handler)
+        _log_handler.close()
+    except Exception as e:
+        print(f"v8.6 EOD CLEANUP | could not close log handler: {e}")
+
+    gone, kept = 0, []
+    for name in files:
+        try:
+            os.remove(name)
+            gone += 1
+        except Exception as e:
+            kept.append(f"{name} ({e})")
+    print(f"v8.6 EOD CLEANUP | deleted {gone}/{len(files)} files; kept upload zip {out}"
+          + (f" | could not delete: {kept}" if kept else ""))
 
 
 def write_summary():
@@ -8657,7 +8704,8 @@ def main():
     _v89_summary()   # v8.9 (log-only)
     _v87_option_tape()   # v8.7 (log-only): 1-min tape of the noted strikes, before the zip so it is included
     log("BOT SHUTDOWN COMPLETE.")
-    _v85_daily_zip()   # v8.5: after the last log line, so the zip holds the whole log
+    _v86_zip = _v85_daily_zip()   # v8.5: after the last log line, so the zip holds the whole log
+    _v86_eod_cleanup(_v86_zip)
 
 
 # =============================================================================

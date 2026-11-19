@@ -8,9 +8,12 @@ Read-only: it only calls fyers.history(), no orders.
 
 Fyers allows about 100 days of 1-min data per request, so it asks in 30-day pieces.
 """
+import os
 import time, csv
 from datetime import date, datetime, timedelta
 from fyers_apiv3 import fyersModel
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 START, END = date(2026, 1, 1), date(2026, 10, 31)
 SYMBOLS = {"NSE:NIFTY50-INDEX": "nifty_spot_1min_2026.csv", "NSE:INDIAVIX-INDEX": "india_vix_1min_2026.csv"}

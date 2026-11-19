@@ -660,6 +660,8 @@ def compute_dpcr(fyers, spot, bot_name="BOT_G", verbose=False, gap_day=False, dp
 #  verification run of the real logic, not a separate test harness.
 # =============================================================================
 if __name__ == "__main__":
+    import os
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     import sys
     from fyers_apiv3 import fyersModel
 

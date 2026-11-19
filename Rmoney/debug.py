@@ -1,5 +1,8 @@
 import os
 import json
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 from helper_rmoney import RMoneyXTSHelper
 
 def setup_helper():

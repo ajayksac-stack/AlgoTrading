@@ -3,6 +3,9 @@ import json
 import traceback
 import os
 import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 import helper_rmoney as helper
 
 # Import XTS SDK

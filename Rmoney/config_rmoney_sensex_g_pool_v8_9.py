@@ -1344,8 +1344,9 @@ V84_ZDIR_FALL_TOL = 0.02           # the 3-candle DPCR change may be at most thi
 # =============================================================================
 # v8.5 (2-Nov-2026) -- daily upload zip + gap-day threshold 0.75 % (BOTG_GAP_THRESHOLD_PCT above). Everything else unchanged.
 # =============================================================================
-V85_DAILY_ZIP = True               # write one upload zip at shutdown (originals stay untouched)
+V85_DAILY_ZIP = True               # write upload zip; cleanup removes originals after verification
 V85_ZIP_NAME = "upload_sensex_{ymd}_{broker}.zip"
+V86_EOD_CLEANUP = True             # delete generated daily files after normal shutdown and zip verification
 
 # =============================================================================
 # v8.6 (3-Nov-2026) -- two LOG-ONLY changes (no trading rule touched).

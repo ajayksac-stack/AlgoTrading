@@ -1,6 +1,7 @@
 """
 Minimal dashboard backend.
-Run with:  uvicorn backend:app --host 0.0.0.0 --port 8000
+From the repository root, run:
+  uvicorn dashboard_vDASH9.backend_vDASH8:app --host 127.0.0.1 --port 8000
 (install once:  pip install fastapi uvicorn --break-system-packages)
 
 Each bot POSTs a small heartbeat every loop cycle and gets back a command
@@ -33,14 +34,22 @@ v-DASH8 (30-Oct-2026): P/L HISTORY for the new "P/L curves" tab.
   - Everything else is unchanged: all v-DASH5 endpoints, the run/halt
     command flow and the 8 s stale rule work exactly as before, so the
     older v-DASH6 / v-DASH7 pages also work against this backend.
+
+v-DASH10: /processes reports the four allowlisted tmux bot windows and
+their recent dashboard heartbeats. POST /processes/{id}/start starts only
+a stopped bot, and is restricted to loopback clients.
 """
 
 import csv
+import shlex
+import shutil
+import subprocess
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -57,6 +66,181 @@ app.add_middleware(
 
 bots: dict[str, dict] = {}  # bot_id -> {pnl, status, command, last_seen}
 STALE_AFTER_SEC = 8  # if no heartbeat in this long, dashboard should show it as stale
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+BOT_PYTHON = ROOT_DIR / ".venv" / "bin" / "python"
+BOT_TMUX_SESSION = "trading-bots"
+BOT_PROCESSES = {
+    "fyers-nifty": {
+        "label": "Fyers Nifty",
+        "window": "Fyers-Nifty",
+        "script": "Fyers/BOT_fyers_nifty_g_pool_vE6.py",
+        "heartbeat_ids": ("NIFTY_FYERS_G", "NIFTY_FYERS_GE"),
+    },
+    "fyers-sensex": {
+        "label": "Fyers Sensex",
+        "window": "Fyers-Sensex",
+        "script": "Fyers/BOT_fyers_sensex_g_pool_v8_9.py",
+        "heartbeat_ids": ("SENSEX_FYERS_G", "SENSEX_FYERS_GE"),
+    },
+    "rmoney-sensex": {
+        "label": "RMoney Sensex",
+        "window": "Rmoney-Sensex",
+        "script": "Rmoney/BOT_rmoney_sensex_g_pool_v8_9.py",
+        "heartbeat_ids": ("SENSEX_RMONEY_G", "SENSEX_RMONEY_GE"),
+    },
+    "rmoney-nifty": {
+        "label": "RMoney Nifty",
+        "window": "Rmoney-Nifty",
+        "script": "Rmoney/BOT_rmoney_nifty_g_pool_vE6.py",
+        "heartbeat_ids": ("NIFTY_RMONEY_G", "NIFTY_RMONEY_GE"),
+    },
+}
+_process_start_lock = threading.Lock()
+
+
+def _run_tmux(args: list[str]) -> subprocess.CompletedProcess:
+    if shutil.which("tmux") is None:
+        raise HTTPException(status_code=503, detail="tmux is not installed or not on PATH")
+    try:
+        result = subprocess.run(
+            ["tmux", *args],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise HTTPException(status_code=504, detail="tmux command timed out") from e
+    except OSError as e:
+        raise HTTPException(status_code=503, detail=f"Could not run tmux: {e}") from e
+
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip() or "tmux command failed"
+        raise HTTPException(status_code=503, detail=detail)
+    return result
+
+
+def _tmux_panes() -> dict[str, list[tuple[str, str]]]:
+    if shutil.which("tmux") is None:
+        raise HTTPException(status_code=503, detail="tmux is not installed or not on PATH")
+    try:
+        session = subprocess.run(
+            ["tmux", "has-session", "-t", BOT_TMUX_SESSION],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise HTTPException(status_code=504, detail="tmux session check timed out") from e
+    except OSError as e:
+        raise HTTPException(status_code=503, detail=f"Could not inspect tmux: {e}") from e
+    if session.returncode:
+        detail = (session.stderr or session.stdout).lower()
+        if any(message in detail for message in (
+            "no server running",
+            "can't find session",
+            "failed to connect to server",
+        )):
+            return {}
+        raise HTTPException(
+            status_code=503,
+            detail=session.stderr.strip() or session.stdout.strip() or "Could not inspect tmux session",
+        )
+
+    result = _run_tmux([
+        "list-panes",
+        "-a",
+        "-F",
+        "#{session_name}\t#{window_name}\t#{pane_dead}\t#{pane_current_command}",
+    ])
+    panes: dict[str, list[tuple[str, str]]] = {}
+    for line in result.stdout.splitlines():
+        session_name, window, dead, command = line.split("\t", 3)
+        if session_name == BOT_TMUX_SESSION:
+            panes.setdefault(window, []).append((dead, command.lower()))
+    return panes
+
+
+def _process_status() -> dict[str, dict]:
+    panes = _tmux_panes()
+    now = time.time()
+    out = {}
+    for process_id, config in BOT_PROCESSES.items():
+        window_panes = panes.get(config["window"], [])
+        running = any(
+            dead == "0" and command.rsplit("/", 1)[-1] in ("python", "python3")
+            for dead, command in window_panes
+        )
+        occupied = any(dead == "0" for dead, _ in window_panes) and not running
+        last_seen = max(
+            (
+                bots[bot_id]["last_seen"]
+                for bot_id in config["heartbeat_ids"]
+                if bot_id in bots and "last_seen" in bots[bot_id]
+            ),
+            default=None,
+        )
+        age_sec = round(max(0, now - last_seen), 1) if last_seen is not None else None
+        out[process_id] = {
+            "id": process_id,
+            "label": config["label"],
+            "window": config["window"],
+            "state": "running" if running else ("other" if occupied else "stopped"),
+            "heartbeat_age_sec": age_sec,
+            "heartbeat_recent": age_sec is not None and age_sec <= STALE_AFTER_SEC,
+        }
+    return out
+
+
+def _require_local_control(request: Request):
+    client_host = request.client.host if request.client else None
+    if client_host not in ("127.0.0.1", "::1"):
+        raise HTTPException(status_code=403, detail="Bot start controls are restricted to localhost")
+
+
+def _start_bot_process(process_id: str):
+    config = BOT_PROCESSES[process_id]
+    script = ROOT_DIR / config["script"]
+    if not BOT_PYTHON.is_file() or not BOT_PYTHON.stat().st_mode & 0o111:
+        raise HTTPException(status_code=503, detail=f"Project Python is not executable: {BOT_PYTHON}")
+    if not script.is_file():
+        raise HTTPException(status_code=503, detail=f"Bot script not found: {script}")
+
+    target = f"{BOT_TMUX_SESSION}:{config['window']}"
+    command = f"exec {shlex.join((str(BOT_PYTHON), str(script)))}"
+    panes = _tmux_panes()
+    if any(
+        dead == "0" and current.rsplit("/", 1)[-1] in ("python", "python3")
+        for dead, current in panes.get(config["window"], [])
+    ):
+        raise HTTPException(status_code=409, detail=f"{config['label']} is already running")
+    if any(dead == "0" for dead, _ in panes.get(config["window"], [])):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{config['window']} has an active non-bot process; stop it manually before starting this bot",
+        )
+
+    if not panes:
+        _run_tmux([
+            "new-session", "-d", "-s", BOT_TMUX_SESSION, "-n", config["window"],
+            "-c", str(ROOT_DIR),
+        ])
+        target_exists = False
+    else:
+        target_exists = config["window"] in panes
+        if not target_exists:
+            _run_tmux([
+                "new-window", "-d", "-t", BOT_TMUX_SESSION, "-n", config["window"],
+                "-c", str(ROOT_DIR),
+            ])
+
+    _run_tmux(["set-window-option", "-t", target, "remain-on-exit", "on"])
+    if target_exists:
+        _run_tmux(["respawn-pane", "-k", "-t", target, command])
+    else:
+        _run_tmux(["send-keys", "-t", target, command, "C-m"])
 
 # BOT_G DPCR/Nifty series -- separate from the bots{} dict above (that's
 # per-bot pnl/status; this is one shared time series for the small charts).
@@ -124,6 +308,14 @@ _pnl_disk_warned = {"done": False}
 # bots' heartbeats can arrive at the same moment -- one lock keeps the
 # in-memory lists and the CSV appends from interleaving.
 _pnl_lock = threading.Lock()
+
+@app.get("/")
+def get_dashboard():
+    """Serve the dashboard from the same forwarded port as its API."""
+    page = Path(__file__).with_name("dashboard_live_vDASH9.html")
+    if not page.is_file():
+        raise HTTPException(status_code=404, detail="Dashboard HTML file not found")
+    return FileResponse(page, media_type="text/html", headers={"Cache-Control": "no-store"})
 
 
 def _today_key() -> str:
@@ -263,6 +455,32 @@ def get_status():
     return out
 
 
+@app.get("/processes")
+def get_processes():
+    """Return tmux process state and the latest heartbeat age for each managed bot."""
+    return _process_status()
+
+
+@app.post("/processes/{process_id}/start")
+def start_process(process_id: str, request: Request):
+    _require_local_control(request)
+    if process_id not in BOT_PROCESSES:
+        raise HTTPException(status_code=404, detail="Unknown bot process")
+
+    with _process_start_lock:
+        state = _process_status()[process_id]["state"]
+        if state == "running":
+            raise HTTPException(status_code=409, detail="This bot is already running")
+        if state == "other":
+            raise HTTPException(
+                status_code=409,
+                detail="The bot's tmux window has another active process; stop it manually before starting",
+            )
+        _start_bot_process(process_id)
+
+    return {"ok": True, "state": "starting", "process_id": process_id}
+
+
 @app.post("/botg_reading")
 def post_botg_reading(r: BotGReading):
     """Call this once per DPCR candle (10-min), from BOT_G only -- not the
@@ -387,4 +605,4 @@ if __name__ == "__main__":
     # access_log=False stops it printing a line for every single
     # heartbeat/status poll - you'll only see startup + real errors now.
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, access_log=False)
+    uvicorn.run(app, host="127.0.0.1", port=8000, access_log=False)
