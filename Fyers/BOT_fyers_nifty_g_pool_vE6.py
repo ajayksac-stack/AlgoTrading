@@ -1,7 +1,7 @@
 # =============================================================================
 #  NIFTY WEEKLY OPTIONS BOT -- BOT_G, MULTI-STRIKE POOL (DPCR + Option-VWAP)
 #  Broker  : Fyers
-#  Updated : 2026-11-18 (vE6.14 v-E54 end-of-day cleanup; vE6.13 v-E52 ATM-OTM2 pool, v-E53 VIX gate; vE6.12 v-E51 exit bid/ask log-only; vE6.11 v-E49 BOT_G 10-min setup candle, v-E50 3m ST filter; vE6.10 v-E48 CE call-add skip log-only; vE6.9 v-E46 shadow lock, v-E47 option tape; vE6.8 v-E45 entry context line; vE6.7 v-E44 ZLM zero line = 09:15 3m close; vE6.6 v-E43 ZLM check at entry; vE6.5 v-E40 min-stop what-if, v-E41 upload zip / fewer files; vE6.4 v-E39 common first DPCR anchor; vE6.3 v-E36 exit what-if, v-E37 brokerage, v-E38 paper ask fill; vE6.2.4 log-only v-E33..v-E35; vE6.2.3 log-only v-E31 ZLM shadow, v-E32 day open; vE6.2.2 hotfix v-E28..v-E30; vE6.2.1 hotfix v-E23..v-E27; vE6.2: rollover fix + log-only trackers, day type, DATA_LOST, live-vs-paper; v-E18..v-E22)
+#  Updated : 2026-11-24 (vE6.14.1 v-E54.1 safer cleanup + zip retry; vE6.14 v-E54 end-of-day cleanup; vE6.13 v-E52 ATM-OTM2 pool, v-E53 VIX gate; vE6.12 v-E51 exit bid/ask log-only; vE6.11 v-E49 BOT_G 10-min setup candle, v-E50 3m ST filter; vE6.10 v-E48 CE call-add skip log-only; vE6.9 v-E46 shadow lock, v-E47 option tape; vE6.8 v-E45 entry context line; vE6.7 v-E44 ZLM zero line = 09:15 3m close; vE6.6 v-E43 ZLM check at entry; vE6.5 v-E40 min-stop what-if, v-E41 upload zip / fewer files; vE6.4 v-E39 common first DPCR anchor; vE6.3 v-E36 exit what-if, v-E37 brokerage, v-E38 paper ask fill; vE6.2.4 log-only v-E33..v-E35; vE6.2.3 log-only v-E31 ZLM shadow, v-E32 day open; vE6.2.2 hotfix v-E28..v-E30; vE6.2.1 hotfix v-E23..v-E27; vE6.2: rollover fix + log-only trackers, day type, DATA_LOST, live-vs-paper; v-E18..v-E22)
 #
 #  v3 (30-Sep-2026) -- LOGGING/DIAGNOSTIC BUILD ONLY. Renamed from the v2
 #  files so v2 data stays clean. NOTHING in entry / exit / SL / BE / P1 /
@@ -24,6 +24,10 @@
 #         LONG_UNWINDING / ...). Raw inputs logged so everything can be
 #         recomputed later. Source: DPCR option chain = NEAREST weekly
 #         expiry (on Mon/Tue that is not the contract BOT_G trades).
+#  vE6.14.1 (24-Nov-2026) -- same file names. Housekeeping hotfix (no trading-logic change).
+#  v-E54.1 cleanup deletes zip-type files only when they are inside today's zip; any such
+#          file missing from the zip -> nothing deleted. Zip write retried once (3 s) and the
+#          failing file + error are logged. (RMoney option tape was lost on 20-Nov.)
 #  vE6.14 (18-Nov-2026) -- same file names. Housekeeping only (no trading-logic change).
 #  v-E54 END-OF-DAY CLEANUP: after the normal 15:10 shutdown the upload zip is written,
 #        re-opened and verified; only then the bot deletes its own daily output files.
@@ -4979,24 +4983,36 @@ def _v41_daily_zip():
     Never touches the originals; any error is logged and ignored."""
     if not V40_DAILY_ZIP:
         return
-    try:
-        import zipfile
-        import glob as _glob
-        names = sorted(set(_glob.glob(LOG_FILE + "*")))
-        names += [TRADE_FILE, LIVECMP_FILE, PATH_FILE, WHATIF_FILE, SETUP_TAGS_FILE,
-                  getattr(_oc_filter, "DPCR_SHIFT_LOG_FILE", ""), TRACK_SUM_FILE,
-                  f"option_tape_{datetime.now():%Y%m%d}_{_BROKER_TAG}.csv",   # v-E47
-                  V51_EXIT_QUOTES_FILE]   # v-E51
-        names = [n for i, n in enumerate(names) if n and os.path.exists(n) and n not in names[:i]]
-        out = f"upload_{datetime.now():%Y%m%d}_{_BROKER_TAG}.zip"
-        log(f"vE6.5 UPLOAD ZIP | writing {out} with {len(names)} files: {', '.join(names)} (v-E41)")
-        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-            for n in names:
-                z.write(n, os.path.basename(n))
-        return out, names   # v-E54 (vE6.14): for the end-of-day cleanup check
-    except Exception as e:
-        log(f"vE6.5 UPLOAD ZIP | failed (ignored, originals untouched): {e}")
+    import zipfile
+    names = _v41_zip_candidates()
+    out = f"upload_{datetime.now():%Y%m%d}_{_BROKER_TAG}.zip"
+    for attempt in (1, 2):   # v-E54.1 (vE6.14.1): one retry, e.g. a Windows file lock
+        cur = ""
+        try:
+            log(f"vE6.5 UPLOAD ZIP | writing {out} with {len(names)} files: {', '.join(names)} (v-E41)")
+            with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+                for n in names:
+                    cur = n
+                    z.write(n, os.path.basename(n))
+            return out, names   # v-E54 (vE6.14): for the end-of-day cleanup check
+        except Exception as e:
+            log(f"vE6.5 UPLOAD ZIP | attempt {attempt} failed at {cur or '-'}: {type(e).__name__}: {e} "
+                f"(originals untouched) (v-E54.1)")
+            if attempt == 1:
+                time.sleep(3)
+                names = _v41_zip_candidates()
     return None
+
+
+def _v41_zip_candidates():
+    """v-E54.1: the review files that belong in today's upload zip (those that exist now)."""
+    import glob as _glob
+    names = sorted(set(_glob.glob(LOG_FILE + "*")))
+    names += [TRADE_FILE, LIVECMP_FILE, PATH_FILE, WHATIF_FILE, SETUP_TAGS_FILE,
+              getattr(_oc_filter, "DPCR_SHIFT_LOG_FILE", ""), TRACK_SUM_FILE,
+              f"option_tape_{datetime.now():%Y%m%d}_{_BROKER_TAG}.csv",   # v-E47
+              V51_EXIT_QUOTES_FILE]   # v-E51
+    return [n for i, n in enumerate(names) if n and os.path.exists(n) and n not in names[:i]]
 
 
 def _v54_eod_cleanup(zip_result):
@@ -5024,13 +5040,17 @@ def _v54_eod_cleanup(zip_result):
     except Exception as e:
         log(f"vE6.14 EOD CLEANUP | zip check error {e} -> nothing deleted (v-E54)")
         return
+    # v-E54.1 (vE6.14.1): every file that belongs in the zip must be inside it
+    unzipped = [n for n in _v41_zip_candidates() if os.path.basename(n) not in inside]
+    if unzipped:
+        log(f"vE6.14 EOD CLEANUP | not in the zip: {', '.join(unzipped)} -> nothing deleted (v-E54.1)")
+        return
     st, tg_ = _FILE_STEM, _BROKER_TAG
-    pats = [f"bot_log_{st}_*_{tg_}.txt*", f"trades_{st}_*_{tg_}.csv", f"summary_{st}_*_{tg_}.csv",
-            f"bot_state_{st}_*_{tg_}.json*", f"trade_paths_{st}_*_{tg_}.csv",
-            f"post_exit_paths_{st}_*_{tg_}.csv", f"post_exit_summary_{st}_*_{tg_}.csv",
-            f"livecmp_{st}_*_{tg_}.csv", f"option_tape_*_{tg_}.csv", f"zlm_shadow_*_{tg_}.csv"]
-    files = set(zipped) | {HEARTBEAT_FILE, WHATIF_FILE, SETUP_TAGS_FILE, V51_EXIT_QUOTES_FILE}
-    files |= {getattr(_oc_filter, a, "") for a in ("OC_LOG_FILE", "DPCR_LOG_FILE", "DPCR_SHIFT_LOG_FILE")}
+    # never-zipped daily files (no review value) + the files confirmed inside the zip
+    pats = [f"summary_{st}_*_{tg_}.csv", f"bot_state_{st}_*_{tg_}.json*",
+            f"post_exit_paths_{st}_*_{tg_}.csv", f"zlm_shadow_*_{tg_}.csv"]
+    files = set(zipped) | {HEARTBEAT_FILE}
+    files |= {getattr(_oc_filter, a, "") for a in ("OC_LOG_FILE", "DPCR_LOG_FILE")}
     for p in pats:
         files |= set(_glob.glob(p))
     files = sorted(f for f in files if f and os.path.isfile(f) and os.path.dirname(f) == ""
@@ -7166,6 +7186,7 @@ def main():
     log(f"  vE6.2 (log-only)      : rollover by trading days (<= {BOTG_ROLLOVER_MAX_DAYS_LEFT} left -> next expiry) | "
         f"trackers {'ON' if BOTG_TRACK_ENABLED else 'OFF'} {BOTG_TRACK_MIN}m/{BOTG_TRACK_POLL_SEC}s | DATA_LOST after "
         f"{BOTG_DATA_LOST_SEC}s | live-vs-paper + charges (brokerage Rs{CHG_BROKERAGE_PER_ORDER}/order, STT {CHG_STT_SELL_PCT}%)")
+    log(f"  vE6.14.1              : cleanup deletes only files confirmed inside the zip; zip retry (v-E54.1)")
     log(f"  vE6.14                : end-of-day cleanup {'ON' if V54_EOD_CLEANUP else 'OFF'} "
         f"(after the 15:10 close: verify upload zip, delete daily files; zips/.py/tokens kept) (v-E54)")
     log(f"  vE6.13                : strike pools {BOTG_STRIKE_POOL_LOW}/{BOTG_STRIKE_POOL_MID}/{BOTG_STRIKE_POOL_HIGH} (v-E52) | "

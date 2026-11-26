@@ -318,6 +318,11 @@ def get_dashboard():
     return FileResponse(page, media_type="text/html", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/health")
+def get_health():
+    return {"ok": True, "service": "trading-dashboard"}
+
+
 def _today_key() -> str:
     return datetime.now().strftime("%Y%m%d")
 

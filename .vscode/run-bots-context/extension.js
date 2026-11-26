@@ -13,43 +13,80 @@ function attachToBots(folder) {
 }
 
 function activate(context) {
-    const command = vscode.commands.registerCommand("algotrading.startBots", (uri) => {
-        const folder = uri
-            ? vscode.workspace.getWorkspaceFolder(uri)
+    function getWorkspace(folderUri) {
+        const folder = folderUri
+            ? vscode.workspace.getWorkspaceFolder(folderUri)
             : vscode.workspace.workspaceFolders?.[0];
-
         if (!folder) {
             void vscode.window.showErrorMessage("Open the bots workspace folder first.");
-            return;
+            return null;
         }
+        return folder;
+    }
 
-        const launcher = path.join(folder.uri.fsPath, "run_bots_tmux.sh");
+    function runLauncher(folder, launcherName) {
+        const launcher = path.join(folder.uri.fsPath, launcherName);
         if (!fs.existsSync(launcher)) {
-            void vscode.window.showErrorMessage(`Bot launcher not found: ${launcher}`);
-            return;
+            void vscode.window.showErrorMessage(`Launcher not found: ${launcher}`);
+            return Promise.reject(new Error(`Launcher not found: ${launcher}`));
         }
-
-        execFile("bash", [launcher], { cwd: folder.uri.fsPath, encoding: "utf8" }, (error, stdout, stderr) => {
-            if (error) {
-                execFile("tmux", ["has-session", "-t", "trading-bots"], (sessionError) => {
-                    if (!sessionError) {
-                        attachToBots(folder);
-                        void vscode.window.showInformationMessage("The bots are already running; attached to their tmux output.");
-                        return;
-                    }
-
+        return new Promise((resolve, reject) => {
+            execFile("bash", [launcher], { cwd: folder.uri.fsPath, encoding: "utf8" }, (error, stdout, stderr) => {
+                if (error) {
                     const detail = (stderr || error.message).trim();
-                    void vscode.window.showErrorMessage(`Could not start the bots: ${detail}`);
-                });
-                return;
-            }
-
-            attachToBots(folder);
-            void vscode.window.showInformationMessage(stdout.trim() || "Started the bots in tmux.");
+                    reject(new Error(detail));
+                    return;
+                }
+                resolve(stdout.trim());
+            });
         });
+    }
+
+    async function openDashboard() {
+        const dashboardUri = await vscode.env.asExternalUri(vscode.Uri.parse("http://127.0.0.1:8000"));
+        await vscode.env.openExternal(dashboardUri);
+    }
+
+    const startBots = vscode.commands.registerCommand("algotrading.startBots", async (uri) => {
+        const folder = getWorkspace(uri);
+        if (!folder) return;
+        try {
+            const output = await runLauncher(folder, "run_bots_tmux.sh");
+            attachToBots(folder);
+            await openDashboard();
+            void vscode.window.showInformationMessage(output || "Started the bots and dashboard.");
+        } catch (error) {
+            void vscode.window.showErrorMessage(`Could not start the trading stack: ${error.message}`);
+        }
     });
 
-    context.subscriptions.push(command);
+    const startDashboard = vscode.commands.registerCommand("algotrading.startDashboard", async (uri) => {
+        const folder = getWorkspace(uri);
+        if (!folder) return;
+        try {
+            const output = await runLauncher(folder, "run_dashboard_tmux.sh");
+            await openDashboard();
+            void vscode.window.showInformationMessage(output || "Started the dashboard.");
+        } catch (error) {
+            void vscode.window.showErrorMessage(`Could not start the dashboard: ${error.message}`);
+        }
+    });
+
+    const startTradingStack = vscode.commands.registerCommand("algotrading.startTradingStack", async (uri) => {
+        const folder = getWorkspace(uri);
+        if (!folder) return;
+        try {
+            await runLauncher(folder, "run_dashboard_tmux.sh");
+            const output = await runLauncher(folder, "run_bots_tmux.sh");
+            attachToBots(folder);
+            await openDashboard();
+            void vscode.window.showInformationMessage(output || "Started bots and dashboard.");
+        } catch (error) {
+            void vscode.window.showErrorMessage(`Could not start the trading stack: ${error.message}`);
+        }
+    });
+
+    context.subscriptions.push(startBots, startDashboard, startTradingStack);
 }
 
 function deactivate() {}
